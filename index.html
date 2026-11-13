@@ -188,6 +188,9 @@ details textarea { margin-top: 8px; font-size: 0.85rem; }
 .kbd { font-family: var(--mono); font-size: 0.72rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 body.standalone .claude-only { display: none !important; }
 body:not(.standalone) .standalone-only { display: none !important; }
+/* AI script writing: always on in the Claude version; on the website only when the server has a key. */
+body.standalone:not(.ai-on) .ai-write { display: none !important; }
+body:not(.standalone) .manual-only, body.ai-on .manual-only { display: none !important; }
 #vid-host { position: fixed; width: 2px; height: 2px; opacity: 0; pointer-events: none; overflow: hidden; left: 0; bottom: 0; }
 @media (prefers-reduced-motion: reduce) { .spin, .rec-badge i { animation: none; } }
 </style>
@@ -197,8 +200,8 @@ body:not(.standalone) .standalone-only { display: none !important; }
   <header class="top">
     <div class="brand">
       <h1>Reel<span>smith</span></h1>
-      <p class="claude-only">Type an idea. Get a script, scenes and captions. Render a video.</p>
-      <p class="standalone-only">Scenes, captions, AI voice and music, rendered to MP4. All in your browser, free.</p>
+      <p class="ai-write">Type an idea. Get a script, scenes and captions. Render a video.</p>
+      <p class="manual-only">Scenes, captions, AI voice and music, rendered to MP4. All in your browser, free.</p>
     </div>
     <div class="projbar">
       <span class="pill" id="example-pill">Example project</span>
@@ -322,15 +325,15 @@ body:not(.standalone) .standalone-only { display: none !important; }
 
     <div class="bench">
       <section class="panel" aria-labelledby="h-create">
-        <h2 id="h-create"><span class="step">01</span> <span class="claude-only">Describe your video</span><span class="standalone-only">Name your video</span></h2>
+        <h2 id="h-create"><span class="step">01</span> <span class="ai-write">Describe your video</span><span class="manual-only">Name your video</span></h2>
         <label>Project name
           <input type="text" id="proj-title" maxlength="120" placeholder="Untitled video">
         </label>
-        <p class="hint standalone-only">This is the standalone studio: edit, voice, score and render here. Script writing, AI images and prompt packs run in the Claude version of Reelsmith. Write there, export the project file from My projects, then import it here. You can also add scenes by hand below.</p>
-        <label class="claude-only">Video idea
+        <p class="hint manual-only">This is the standalone studio: edit, voice, score and render here. Script writing, AI images and prompt packs run in the Claude version of Reelsmith. Write there, export the project file from My projects, then import it here. You can also add scenes by hand below.</p>
+        <label class="ai-write">Video idea
           <textarea id="idea" rows="3" placeholder="e.g. A 30-second promo for my barbershop's new Saturday hours, ending with 'Book now'"></textarea>
         </label>
-        <div class="grid3 claude-only">
+        <div class="grid3 ai-write">
           <label>Format
             <select id="style">
               <option>Explainer</option><option>Promo / ad</option><option>Listicle (top tips)</option><option>Story</option><option>Product demo</option><option>Motivational</option>
@@ -347,13 +350,14 @@ body:not(.standalone) .standalone-only { display: none !important; }
             </select>
           </label>
         </div>
-        <div class="row claude-only">
+        <div class="row ai-write">
           <button class="primary" id="gen"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l1.8 5.2L15 7l-5.2 1.8L8 14l-1.8-5.2L1 7l5.2-1.8z"/></svg> Write my video</button>
         </div>
-        <div class="row claude-only">
+        <div class="row ai-write">
           <input type="text" id="revise" class="grow" placeholder="Ask for changes: 'make it funnier', 'add a scene about pricing'">
           <button id="revise-btn">Apply edit</button>
         </div>
+        <p class="hint standalone-only ai-write" style="font-size:.8rem">Scripts are written by Claude. Free to use, a few per hour. Your idea is sent to Anthropic to write it; nothing else leaves this browser.</p>
         <p class="status" id="ai-status" aria-live="polite"></p>
       </section>
 
@@ -1376,13 +1380,30 @@ function applyAI(data, keepMedia) {
   $('#proj-title').value = project.title;
   markEdited(); renderScenes(); seek(0);
 }
+const waitText = s => { const m = Math.ceil((+s || 60) / 60); return m >= 90 ? `${Math.round(m / 60)} hours` : m > 1 ? `${m} minutes` : 'a minute'; };
+function aiError(e) {
+  const c = e && e.code;
+  return c === 'not_granted' ? 'AI access was declined for this page. You can still edit scenes by hand.'
+    : c === 'rate_limited' ? `You've written a few scripts in a short time. Try again in ${waitText(e.retryAfter)}, or edit the scenes by hand.`
+    : c === 'daily_limit' ? "That's today's free scripts used up. Come back tomorrow, or keep editing these scenes by hand."
+    : c === 'site_busy' ? 'The free script writer is at capacity for today. Try again tomorrow, or edit the scenes by hand.'
+    : c === 'refused' ? 'Claude could not write a script for that idea. Try describing it differently.'
+    : c === 'unavailable' ? 'Script writing is switched off right now. You can still edit every scene by hand.'
+    : c === 'offline' ? 'Could not reach the script writer. Check your connection and try again.'
+    : c === 'invalid_json' || c === 'shape' ? 'The script came back in an unexpected shape. Try again, or rephrase your idea.'
+    : 'Could not write the script this time. Try again in a moment.';
+}
+let aiBusy = false;
 async function runAI(mode) {
-  const sample = await getCap('sample');
-  if (!sample) { setStatus(aiStatus, 'AI writing is not available in this view. You can still edit every scene by hand.', 'err'); return; }
-  let input;
+  if (aiBusy || exporting) return;
+  const web = window.RS_STANDALONE && window.RS_AI;
+  const sample = web ? null : await getCap('sample');
+  if (!web && !sample) { setStatus(aiStatus, 'AI writing is not available in this view. You can still edit every scene by hand.', 'err'); return; }
+  let input, req;
   if (mode === 'new') {
     const idea = $('#idea').value.trim();
     if (!idea) { setStatus(aiStatus, 'Describe your video idea first.', 'err'); $('#idea').focus(); return; }
+    req = { mode: 'new', idea: idea.slice(0, 600), format: $('#style').value, tone: $('#tone').value, length: +$('#length').value, aspect: project.aspect };
     input = `You write scripts for short social videos. ${SCHEMA}
 Target total length: about ${$('#length').value} seconds.
 Video format: ${$('#style').value}. Tone: ${$('#tone').value}. Aspect: ${project.aspect}.
@@ -1391,26 +1412,26 @@ Video idea from the creator: """${idea}"""`;
     const ask = $('#revise').value.trim();
     if (!ask) { setStatus(aiStatus, 'Type the change you want, then press Apply edit.', 'err'); $('#revise').focus(); return; }
     const current = project.scenes.map(s => ({ kind: s.kind, caption: s.caption, sub: s.sub, narration: s.narration, visual: s.visual, duration: s.duration, palette: [s.c1, s.c2] }));
+    if (!current.length) { setStatus(aiStatus, 'There is no script to change yet. Describe your video and press Write my video.', 'err'); return; }
+    req = { mode: 'revise', ask: ask.slice(0, 300), title: project.title, scenes: current.slice(0, 20), aspect: project.aspect };
     input = `You edit scripts for short social videos. Here is the current script as JSON:
 ${JSON.stringify({ title: project.title, scenes: current })}
 Apply this change requested by the creator: """${ask}"""
 Keep everything the creator did not ask to change. ${SCHEMA}`;
   }
-  const btns = [$('#gen'), $('#revise-btn')]; btns.forEach(b => b.disabled = true);
+  const btns = [$('#gen'), $('#revise-btn')]; btns.forEach(b => b.disabled = true); aiBusy = true;
+  const hadWork = !project.example && project.scenes.some(s => s.caption || s.narration);
   setStatus(aiStatus, `<span class="spin"></span> ${mode === 'new' ? 'Writing your script and scenes…' : 'Applying your edit…'}`);
   try {
-    const data = await sample.json(input, { modelTier: 'default' });
+    const forSession = sessionN;
+    const data = web ? await window.RS_AI.write(req) : await sample.json(input, { modelTier: 'default' });
+    if (sessionN !== forSession) { setStatus(aiStatus, ''); return; } // a different project was opened meanwhile
     applyAI(data, mode !== 'new');
-    setStatus(aiStatus, `Done: ${project.scenes.length} scenes, ${fmt(total())} total. Press play to preview.`, 'ok');
+    setStatus(aiStatus, `Done: ${project.scenes.length} scenes, ${fmt(total())} total. Press play to preview.${hadWork ? ' Undo brings back your previous scenes.' : ''}`, 'ok');
     if (mode !== 'new') $('#revise').value = '';
   } catch (e) {
-    const c = e && e.code;
-    const msg = c === 'not_granted' ? 'AI access was declined for this page. You can still edit scenes by hand.'
-      : c === 'rate_limited' ? 'Too many requests just now. Wait a minute and try again.'
-      : c === 'invalid_json' || c === 'shape' ? 'The script came back in an unexpected shape. Try again, or rephrase your idea.'
-      : 'Could not write the script this time. Try again in a moment.';
-    setStatus(aiStatus, msg, 'err');
-  } finally { btns.forEach(b => b.disabled = false); }
+    setStatus(aiStatus, aiError(e), 'err');
+  } finally { aiBusy = false; btns.forEach(b => b.disabled = !!exporting); }
 }
 $('#gen').addEventListener('click', () => runAI('new'));
 $('#revise-btn').addEventListener('click', () => runAI('revise'));
@@ -1593,7 +1614,7 @@ async function runExport(aspects) {
   if (!project.scenes.length) { setStatus(rStatus, 'Add at least one scene first.', 'err'); return; }
   if (exporting) return;
   if (composeP) { setStatus(rStatus, '<span class="spin"></span> Finishing the music first…'); await composeP; if (exporting) return; }
-  const busy = VS.busy ? 'the voiceover' : imgJob ? 'the AI images' : promptBusy ? 'the prompts' : '';
+  const busy = aiBusy ? 'the script' : VS.busy ? 'the voiceover' : imgJob ? 'the AI images' : promptBusy ? 'the prompts' : '';
   if (busy) { setStatus(rStatus, `Wait for ${busy} to finish, then render.`, 'err'); return; }
   if (playing) pause();
   const orig = project.aspect; const job = { cancelled: false, label: '' }; exporting = job; exportUI(true);
@@ -2501,6 +2522,7 @@ fontsReady.then(() => { poster(); drawThumbs(); });
 if (project.music && project.music.kind === 'composed') { $('#mood').value = project.music.mood; compose(project.music.seed, true); }
 if (project.sfx.on) queueSfx();
 initCloud();
+if (window.RS_STANDALONE && window.RS_AI) window.RS_AI.status().then(on => document.body.classList.toggle('ai-on', !!on)).catch(() => {});
 })();
 </script>
 </body>

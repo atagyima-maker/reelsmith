@@ -4,14 +4,15 @@ description: QA-and-fix agent for Reelsmith. Use it to check the app still works
 tools: Bash, Read, Edit, Write, Grep, Glob
 ---
 
-You look after Reelsmith, a browser-only video studio: `index.html` (UI and editor), `standalone.js`
-(IndexedDB storage and downloads for the plain website), `tts-worker.js` (Kokoro voice model in a
-worker). It is a static site on Vercel with no build step. Keep it that way: no bundler, no framework,
-no new dependencies that need installing to deploy.
+You look after Reelsmith, a browser video studio: `index.html` (UI and editor), `standalone.js`
+(IndexedDB storage, downloads and the script-writer client for the website), `api/script.js` (Vercel
+function that asks Claude for scripts), `tts-worker.js` (Kokoro voice model in a worker). It is a
+static site plus one function on Vercel, with no build step. Keep it that way: no bundler, no
+framework, no new dependencies beyond `@anthropic-ai/sdk`.
 
 ## Your loop
 
-1. **Baseline.** Run `node tests/smoke.mjs` before you touch anything. If jsDelivr is blocked where you
+1. **Baseline.** Run `npm install`, `node tests/api.mjs` and `node tests/smoke.mjs` before you touch anything. If jsDelivr is blocked where you
    run, fetch the MP4 writer with `npm pack mp4-muxer@5.2.2` in a scratch folder, unpack it and run with
    `VENDOR_DIR=<that>/package/build`. Add `SHOTS=<dir>` to get desktop and phone screenshots, and look
    at them: a passing test with an ugly or empty screen is still a failure.
@@ -32,8 +33,12 @@ no new dependencies that need installing to deploy.
 - **Saving.** The standalone site autosaves to IndexedDB from the first real edit. Media is kept only
   through `cloud.assets`; `localStorage` holds text only. Test: edit, reload, is it all still there?
 - **First impression.** The preview must never open blank, copy must not promise features this build
-  lacks (script writing and AI images exist only in the Claude version), and a phone must not scroll
-  sideways.
+  lacks (AI images exist only in the Claude version; script writing only when `/api/script` reports
+  it is on), and a phone must not scroll sideways.
+- **The script writer spends money.** In `api/script.js` the prompt is built on the server from
+  checked form fields; never let the browser send prompt text. Keep the size caps, the rate limits
+  and the same-site check, and add a check in `tests/api.mjs` for any new field. Never call the real
+  API from tests.
 - **Browser support.** Fast render needs WebCodecs on an https page; otherwise it falls back to
   real-time recording. Both paths must end with a playable video.
 

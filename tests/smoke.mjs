@@ -44,7 +44,8 @@ try {
   // Boot and first impression
   check('example project loads with scenes', (await page.$$('.scene')).length === 6);
   check('preview canvas draws', (await canvasLit(page)) > 50);
-  check('standalone tagline does not promise AI script writing', !/Get a script/i.test(await page.locator('.brand p:visible').innerText()), await page.locator('.brand p:visible').innerText());
+  check('with the script writer off, its controls are hidden', !(await page.isVisible('#gen')) && !(await page.isVisible('#idea')));
+  check('with the script writer off, the tagline does not promise it', !/Get a script/i.test(await page.locator('.brand p:visible').innerText()), await page.locator('.brand p:visible').innerText());
 
   // Playback
   await page.click('#play'); await page.waitForTimeout(1200); await page.click('#play');
@@ -113,6 +114,56 @@ try {
   }
   if (process.env.SHOTS) await page.screenshot({ path: join(process.env.SHOTS, 'desktop.png'), fullPage: false });
   check('no script errors on desktop', errors.length === 0, errors.slice(0, 5).join(' | '));
+
+  // AI script writing, with /api/script answered by a stand-in for the server
+  {
+    const actx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    const a = await newPage(actx);
+    const sent = []; let reply = null;
+    await actx.route(ORIGIN + '/api/script', r => {
+      if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"enabled":true}' });
+      sent.push(JSON.parse(r.request().postData() || '{}'));
+      const x = typeof reply === 'function' ? reply() : reply;
+      return r.fulfill({ status: x.status || 200, contentType: 'application/json', body: JSON.stringify(x.body) });
+    });
+    const p = a.page;
+    await p.goto(ORIGIN + '/'); await p.waitForSelector('#gen', { state: 'visible', timeout: 5000 }).catch(() => {});
+    check('with the script writer on, the idea box and Write button show', await p.isVisible('#idea') && await p.isVisible('#gen'));
+    check('with the script writer on, the tagline offers it', /Type an idea/.test(await p.locator('.brand p:visible').innerText()));
+    await p.click('#gen');
+    check('empty idea asks for one first, without calling the server', /Describe your video idea first/.test(await status(p, '#ai-status')) && sent.length === 0);
+
+    reply = { body: { title: 'Saturday cuts', scenes: [
+      { kind: 'scene', caption: 'Saturdays just got sharper', sub: '', narration: 'Hook.', visual: 'Barber chair', duration: 4, palette: ['#102030', '#405060'] },
+      { kind: 'scene', caption: '<img src=x onerror="window.__pwned=3">', sub: '', narration: 'Middle.', visual: 'Clippers', duration: 4, palette: null },
+      { kind: 'title', caption: 'BOOK NOW', sub: 'Open 9 to 5', narration: 'Book now.', visual: '', duration: 5, palette: null }
+    ] } };
+    await p.fill('#idea', 'A promo for my barbershop Saturday hours');
+    await p.selectOption('#tone', 'Funny');
+    await p.click('#gen');
+    await p.waitForFunction(() => /Done:/.test(document.querySelector('#ai-status').textContent), null, { timeout: 5000 }).catch(() => {});
+    check('Write my video replaces the scenes with the new script', (await p.$$('.scene')).length === 3 && (await p.inputValue('#proj-title')) === 'Saturday cuts', await status(p, '#ai-status'));
+    check('only form fields are sent (no prompt text)', sent[0] && sent[0].mode === 'new' && sent[0].tone === 'Funny' && !Object.keys(sent[0]).some(k => /prompt|system|messages|input/.test(k)), JSON.stringify(sent[0]));
+    check('script text from the server cannot run script', !(await p.evaluate(() => window.__pwned)));
+
+    await p.fill('#revise', 'make it shorter');
+    await p.press('#revise', 'Enter');
+    await p.waitForFunction(() => /Done:/.test(document.querySelector('#ai-status').textContent) && !document.querySelector('#gen').disabled, null, { timeout: 5000 }).catch(() => {});
+    check('Apply edit sends the current scenes with the change', sent[1] && sent[1].mode === 'revise' && sent[1].ask === 'make it shorter' && sent[1].scenes.length === 3);
+    check('after replacing real work, the status says undo brings it back', /Undo brings back/.test(await status(p, '#ai-status')));
+
+    reply = { status: 429, body: { error: 'rate_limited', retryAfter: 1500 } };
+    await p.click('#gen');
+    await p.waitForFunction(() => document.querySelector('#ai-status').classList.contains('err'), null, { timeout: 5000 }).catch(() => {});
+    check('rate limit shows a friendly wait time', /Try again in 25 minutes/.test(await status(p, '#ai-status')), await status(p, '#ai-status'));
+    reply = { status: 422, body: { error: 'refused' } };
+    await p.click('#gen');
+    await p.waitForFunction(() => /could not write/.test(document.querySelector('#ai-status').textContent), null, { timeout: 5000 }).catch(() => {});
+    check('a declined idea gets a clear message', /could not write a script for that idea/.test(await status(p, '#ai-status')));
+    check('scenes are untouched when writing fails', (await p.$$('.scene')).length === 3);
+    check('no script errors with the script writer on', a.errors.length === 0, a.errors.slice(0, 5).join(' | '));
+    await actx.close();
+  }
 
   // Phone layout
   const phone = await browser.newContext({ ...devices['iPhone 13'] });

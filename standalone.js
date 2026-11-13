@@ -120,6 +120,23 @@
     }
   };
 
+  /* ---- AI script writing: the site's /api/script function (Claude), only when the server has a key ---- */
+  const aiErr = (code, extra) => Object.assign(new Error(code), { code }, extra || {});
+  window.RS_AI = {
+    async status() {
+      try { const r = await fetch('api/script', { cache: 'no-store' }); return r.ok && (await r.json()).enabled === true; } catch (e) { return false; }
+    },
+    async write(req) {
+      let r;
+      try { r = await fetch('api/script', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) }); }
+      catch (e) { throw aiErr('offline'); }
+      let body = null; try { body = await r.json(); } catch (e) {}
+      if (!r.ok) throw aiErr((body && body.error) || 'failed', { retryAfter: body && body.retryAfter });
+      if (!body || !Array.isArray(body.scenes)) throw aiErr('shape');
+      return body;
+    }
+  };
+
   const user = { canEdit: async () => true };
   const caps = { db, assets, downloads, user };
   // Script writing and AI images ('sample') only exist in the Claude version, so they resolve to null here.
