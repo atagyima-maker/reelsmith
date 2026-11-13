@@ -52,6 +52,7 @@ try {
   await page.click('#gen');
   check('without a code or key, Write asks for one instead of spending anything', await page.isVisible('#ai-access') && !(await page.isVisible('#invite-row')) && (await page.$$('.scene')).length === 6);
   check('people without a key are told how to get one, and that AI is optional', await page.isVisible('#no-key-help') && /console\.anthropic\.com/.test(await status(page, '#no-key-help')) && /by hand/.test(await status(page, '#no-key-help')));
+  check('the page says AI writing is a paid extra and the rest is free', /paid extra/.test(await status(page, '#ai-access-why')) && /Everything else in Reelsmith is free/.test(await status(page, '#ai-access-why')) && /Reelsmith is free/.test(await status(page, '#ai-hint')));
   await page.click('#ai-access-close'); await page.fill('#idea', '');
 
   // Playback
@@ -147,7 +148,7 @@ try {
     const p = a.page;
     await p.goto(ORIGIN + '/'); await p.waitForSelector('#gen', { state: 'visible', timeout: 5000 }).catch(() => {});
     check('with the script writer on, the idea box and Write button show', await p.isVisible('#idea') && await p.isVisible('#gen'));
-    check('with the script writer on, the tagline offers it', /Type an idea/.test(await p.locator('.brand p:visible').innerText()));
+    check('the tagline says the studio is free and AI writing needs your own key', /free video studio/.test(await p.locator('.brand p:visible').innerText()) && /own Anthropic key/.test(await p.locator('.brand p:visible').innerText()));
     await p.click('#gen');
     check('empty idea asks for one first, without calling the server', /Describe your video idea first/.test(await status(p, '#ai-status')) && sent.length === 0);
 
