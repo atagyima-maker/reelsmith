@@ -59,7 +59,10 @@ self.onmessage = async e => {
     if (m.type === 'load') { await load(); postMessage({ id: m.id, type: 'ready' }); }
     else if (m.type === 'speak') {
       const r = await speak(String(m.text || ''), m.voice || 'af_heart', +m.speed || 1);
-      postMessage({ id: m.id, type: 'audio', samples: r.samples, rate: r.rate }, [r.samples.buffer]);
+      // Hand over a buffer the samples own outright: a view into model memory cannot be transferred.
+      let out = r.samples;
+      if (out.byteOffset || out.byteLength !== out.buffer.byteLength) out = out.slice();
+      postMessage({ id: m.id, type: 'audio', samples: out, rate: r.rate }, [out.buffer]);
     }
   } catch (err) {
     postMessage({ id: m.id, type: 'error', message: String((err && err.message) || err) });

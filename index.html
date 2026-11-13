@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="Reelsmith: turn a script into a captioned, voiced and scored video, right in your browser.">
 <title>Reelsmith</title>
+<meta name="theme-color" content="#11131b">
+<meta property="og:title" content="Reelsmith: a video studio in your browser">
+<meta property="og:description" content="Write scenes, add footage, AI voiceover and an original score, then render an MP4 for Reels, YouTube or your feed. Free, nothing to install.">
+<meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%2311131b%27/%3E%3Cpath d=%27M12 9v14l11-7z%27 fill=%27%23ff9a3c%27/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -184,6 +188,9 @@ details textarea { margin-top: 8px; font-size: 0.85rem; }
 .kbd { font-family: var(--mono); font-size: 0.72rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 body.standalone .claude-only { display: none !important; }
 body:not(.standalone) .standalone-only { display: none !important; }
+/* AI script writing: always on in the Claude version; on the website only when the server has a key. */
+body.standalone:not(.ai-on) .ai-write { display: none !important; }
+body:not(.standalone) .manual-only, body.ai-on .manual-only { display: none !important; }
 #vid-host { position: fixed; width: 2px; height: 2px; opacity: 0; pointer-events: none; overflow: hidden; left: 0; bottom: 0; }
 @media (prefers-reduced-motion: reduce) { .spin, .rec-badge i { animation: none; } }
 </style>
@@ -193,7 +200,8 @@ body:not(.standalone) .standalone-only { display: none !important; }
   <header class="top">
     <div class="brand">
       <h1>Reel<span>smith</span></h1>
-      <p>Type an idea. Get a script, scenes and captions. Render a video.</p>
+      <p class="ai-write">Type an idea. Get a script, scenes and captions. Render a video.</p>
+      <p class="manual-only">Scenes, captions, AI voice and music, rendered to MP4. All in your browser, free.</p>
     </div>
     <div class="projbar">
       <span class="pill" id="example-pill">Example project</span>
@@ -317,15 +325,15 @@ body:not(.standalone) .standalone-only { display: none !important; }
 
     <div class="bench">
       <section class="panel" aria-labelledby="h-create">
-        <h2 id="h-create"><span class="step">01</span> Describe your video</h2>
+        <h2 id="h-create"><span class="step">01</span> <span class="ai-write">Describe your video</span><span class="manual-only">Name your video</span></h2>
         <label>Project name
           <input type="text" id="proj-title" maxlength="120" placeholder="Untitled video">
         </label>
-        <p class="hint standalone-only">This is the standalone studio: edit, voice, score and render here. Script writing, AI images and prompt packs run in the Claude version of Reelsmith. Write there, export the project file from My projects, then import it here. You can also add scenes by hand below.</p>
-        <label class="claude-only">Video idea
+        <p class="hint manual-only">This is the standalone studio: edit, voice, score and render here. Script writing, AI images and prompt packs run in the Claude version of Reelsmith. Write there, export the project file from My projects, then import it here. You can also add scenes by hand below.</p>
+        <label class="ai-write">Video idea
           <textarea id="idea" rows="3" placeholder="e.g. A 30-second promo for my barbershop's new Saturday hours, ending with 'Book now'"></textarea>
         </label>
-        <div class="grid3 claude-only">
+        <div class="grid3 ai-write">
           <label>Format
             <select id="style">
               <option>Explainer</option><option>Promo / ad</option><option>Listicle (top tips)</option><option>Story</option><option>Product demo</option><option>Motivational</option>
@@ -342,13 +350,14 @@ body:not(.standalone) .standalone-only { display: none !important; }
             </select>
           </label>
         </div>
-        <div class="row claude-only">
+        <div class="row ai-write">
           <button class="primary" id="gen"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l1.8 5.2L15 7l-5.2 1.8L8 14l-1.8-5.2L1 7l5.2-1.8z"/></svg> Write my video</button>
         </div>
-        <div class="row claude-only">
+        <div class="row ai-write">
           <input type="text" id="revise" class="grow" placeholder="Ask for changes: 'make it funnier', 'add a scene about pricing'">
           <button id="revise-btn">Apply edit</button>
         </div>
+        <p class="hint standalone-only ai-write" style="font-size:.8rem">Scripts are written by Claude. Free to use, a few per hour. Your idea is sent to Anthropic to write it; nothing else leaves this browser.</p>
         <p class="status" id="ai-status" aria-live="polite"></p>
       </section>
 
@@ -505,10 +514,12 @@ body:not(.standalone) .standalone-only { display: none !important; }
         </div>
         <div class="bar" id="render-bar" hidden><i id="render-fill"></i></div>
         <p class="status" id="render-status" aria-live="polite"></p>
+        <div class="row" id="rate" hidden><span class="hint">How did your video turn out?</span><button class="small" data-rate="up">👍 Love it</button><button class="small" data-rate="down">👎 Not great</button></div>
         <div class="results" id="results"></div>
       </section>
     </div>
   </div>
+  <p class="hint standalone-only" style="font-size:.75rem;text-align:center;margin-top:8px">Reelsmith counts anonymous usage, like how many videos get rendered, to decide what to improve. No cookies, nothing that identifies you, and nothing if your browser asks not to be tracked.</p>
 </div>
 <div id="vid-host" aria-hidden="true"></div>
 
@@ -517,6 +528,9 @@ body:not(.standalone) .standalone-only { display: none !important; }
 <script>
 (() => {
 const $ = s => document.querySelector(s);
+// Anonymous usage counts (website only, see api/event.js). Never blocks or breaks the studio.
+const stat = (e, v) => { try { if (window.RS_TRACK) window.RS_TRACK(e, v); } catch (err) {} };
+const statOnce = (() => { const seen = new Set(); return (e, v) => { if (!seen.has(e)) { seen.add(e); stat(e, v); } }; })();
 const ASPECTS = { '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [960, 960] };
 let uid = 1;
 const nid = p => (p || 's') + Date.now().toString(36) + (uid++);
@@ -530,6 +544,7 @@ const preloadAssets = async ids => { if (window.RS_PRELOAD) await window.RS_PREL
 const MAX_MB = window.RS_MAX_MB || 20;
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const hash01 = n => { const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+const safeId = (x, p) => (typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x) ? x : nid(p));
 const when = iso => { try { return new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
 const TITLE_STYLES = ['impact', 'glitch', 'fade', 'type'];
 const FONTS = {
@@ -554,7 +569,8 @@ const GRADES = {
 };
 function normProject(p) {
   p = p || {};
-  p.scenes = (Array.isArray(p.scenes) ? p.scenes : []).map(normScene);
+  const seen = new Set();
+  p.scenes = (Array.isArray(p.scenes) ? p.scenes : []).map(normScene).map(sc => { if (seen.has(sc.id)) sc.id = nid(); seen.add(sc.id); return sc; });
   if (!ASPECTS[p.aspect]) p.aspect = '9:16';
   p.hl = HEX.test(p.hl) ? p.hl : '#ffd23f';
   p.look = { ...LOOK_DEFAULT, ...(p.look || {}) };
@@ -587,7 +603,7 @@ function normScene(s) {
   s = s || {};
   const pr = s.prompts && typeof s.prompts === 'object' ? { mj: String(s.prompts.mj || '').slice(0, 2000), rw: String(s.prompts.rw || '').slice(0, 1200), iv: String(s.prompts.iv || '').slice(0, 2000) } : null;
   return {
-    id: s.id || nid(), kind: s.kind === 'title' ? 'title' : 'scene',
+    id: safeId(s.id), kind: s.kind === 'title' ? 'title' : 'scene',
     caption: String(s.caption || '').slice(0, 140), sub: String(s.sub || '').slice(0, 100), narration: String(s.narration || '').slice(0, 600),
     visual: String(s.visual || '').slice(0, 160), duration: clamp(Number(s.duration) || 4, 1, 30),
     c1: HEX.test(s.c1) ? s.c1 : '#1d2340', c2: HEX.test(s.c2) ? s.c2 : '#5b3fa0', mediaId: s.mediaId || null, voiceId: s.voiceId || null,
@@ -652,7 +668,8 @@ function renderLibrary() {
   $('#autofill').disabled = media.size === 0;
 }
 $('#media-in').addEventListener('change', e => {
-  [...e.target.files].forEach(addMediaFile); e.target.value = '';
+  const kinds = [...e.target.files].map(f => { const id = addMediaFile(f); return id && media.get(id).kind; }).filter(Boolean); e.target.value = '';
+  if (kinds.length) stat('media_add', kinds.includes('video') ? 'video' : 'image');
   renderLibrary(); renderScenes();
 });
 $('#autofill').addEventListener('click', () => {
@@ -1060,7 +1077,7 @@ $('#scenes').addEventListener('input', e => {
   else if (f === 'trimIn') { const v = parseFloat(e.target.value); s.trimIn = isNaN(v) ? 0 : clamp(v, 0, 3600); syncVideos(curT, playing); }
   else if (f === 'duration') { const v = parseFloat(e.target.value); if (!isNaN(v)) s.duration = clamp(v, 1, 30); renderTrack(); updateSceneTimes(); updateMusicUI(); }
   else return;
-  markEdited(); updateScript(); drawThumbs(); if (!playing) renderNow(); saveProject();
+  markEdited(); updateScript(); drawThumbs(); if (!playing) renderNow(); saveProject(); statOnce('scene_edit');
 });
 $('#scenes').addEventListener('change', e => {
   const art = e.target.closest('.scene'); if (!art) return; const s = sceneById(art.dataset.id); if (!s) return;
@@ -1069,12 +1086,12 @@ $('#scenes').addEventListener('change', e => {
     const id = addVoiceFile(e.target.files[0]); e.target.value = ''; if (id) { s.voiceId = id; markEdited(); renderScenes(); }
   }
   else if (e.target.id === 'up-' + s.id && e.target.files[0]) {
-    const id = addMediaFile(e.target.files[0]); if (id) { s.mediaId = id; renderLibrary(); markEdited(); renderScenes(); renderNow(); }
+    const id = addMediaFile(e.target.files[0]); if (id) { stat('media_add', media.get(id).kind); s.mediaId = id; renderLibrary(); markEdited(); renderScenes(); renderNow(); }
   }
 });
 $('#scenes').addEventListener('click', e => {
   const art = e.target.closest('.scene'); if (!art) return; const idx = project.scenes.findIndex(s => s.id === art.dataset.id);
-  if (e.target.classList.contains('thumb')) { seek(sceneStart(idx) + 0.05); return; }
+  if (e.target.classList.contains('thumb')) { seek(sceneLook(idx)); return; }
   const cp = e.target.closest('[data-copy]');
   if (cp) { const k = cp.dataset.copy; copyText(project.scenes[idx].prompts?.[k] || '', cp, art.querySelector(`[data-ptext="${k}"]`)); return; }
   const act = e.target.closest('[data-act]')?.dataset.act; if (!act) return;
@@ -1092,13 +1109,15 @@ $('#scenes').addEventListener('click', e => {
 });
 function updateSceneTimes() {
   let t = 0;
-  document.querySelectorAll('.scene').forEach((el, i) => { const s = project.scenes[i]; el.querySelector('.scene-num').textContent = `SCENE ${String(i + 1).padStart(2, '0')} · ${fmt(t)}–${fmt(t + s.duration)}`; t += s.duration; });
+  document.querySelectorAll('.scene').forEach((el, i) => { const s = project.scenes[i]; el.querySelector('.scene-num').textContent = `${s.kind === 'title' ? 'TITLE' : 'SCENE'} ${String(i + 1).padStart(2, '0')} · ${fmt(t)}–${fmt(t + s.duration)}`; t += s.duration; });
 }
 const sceneStart = idx => project.scenes.slice(0, idx).reduce((a, s) => a + s.duration, 0);
+// Where to park the playhead when jumping to a scene: past the cut and the caption fade-in, so the scene shows with its text.
+const sceneLook = idx => sceneStart(idx) + Math.min(0.6, (project.scenes[idx]?.duration || 1) * 0.4);
 $('#add-scene').addEventListener('click', () => {
   const last = project.scenes[project.scenes.length - 1];
   project.scenes.push(normScene({ caption: 'New scene', narration: '', visual: '', duration: 3.5, c1: last?.c1, c2: last?.c2 }));
-  markEdited(); renderScenes(); seek(sceneStart(project.scenes.length - 1) + 0.05);
+  markEdited(); renderScenes(); seek(sceneLook(project.scenes.length - 1));
 });
 $('#add-title').addEventListener('click', () => {
   project.scenes.push(normScene({ kind: 'title', caption: (project.title || 'Your title').toUpperCase().slice(0, 60), sub: '', narration: '', duration: 5, c1: '#05070d', c2: '#121c33', titleStyle: project.titleStyle }));
@@ -1235,6 +1254,7 @@ $('#voice-in').addEventListener('change', e => {
   loadTrack('voice', { url: URL.createObjectURL(f), label: f.name, isVideo: f.type.startsWith('video'), file: f, loop: false }); saveProject();
 });
 $('#music-vol').addEventListener('input', e => { tracks.music.vol = +e.target.value; });
+['#music-vol', '#voice-vol'].forEach(sel => $(sel).addEventListener('change', () => queueCloud()));
 $('#voice-vol').addEventListener('input', e => { tracks.voice.vol = +e.target.value; if (tracks.voice.gain) tracks.voice.gain.gain.value = tracks.voice.vol; if (voiceGain) voiceGain.gain.value = tracks.voice.vol; });
 $('#sfx-vol').addEventListener('input', e => { project.sfx.vol = +e.target.value; tracks.sfx.vol = project.sfx.vol; if (tracks.sfx.gain) tracks.sfx.gain.gain.value = tracks.sfx.vol; saveProject(); });
 function startAudio(t) {
@@ -1331,11 +1351,11 @@ document.addEventListener('keydown', e => {
     if (e.target.closest('input[type=text], input[type=number], textarea')) return;
     e.preventDefault(); if (k === 'y' || e.shiftKey) redo(); else undo(); return;
   }
-  if (e.target.closest('input, textarea, select, button')) return;
+  if (e.target.closest('input, textarea, select, button, summary, a, [contenteditable]')) return;
   if (e.code === 'Space') { e.preventDefault(); playing ? pause() : play(); }
   else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
     e.preventDefault(); const { i } = sceneAt(curT); const j = clamp(i + (e.key === 'ArrowRight' ? 1 : -1), 0, project.scenes.length - 1);
-    seek(sceneStart(j) + 0.05);
+    seek(sceneLook(j));
   }
 });
 
@@ -1366,13 +1386,30 @@ function applyAI(data, keepMedia) {
   $('#proj-title').value = project.title;
   markEdited(); renderScenes(); seek(0);
 }
+const waitText = s => { const m = Math.ceil((+s || 60) / 60); return m >= 90 ? `${Math.round(m / 60)} hours` : m > 1 ? `${m} minutes` : 'a minute'; };
+function aiError(e) {
+  const c = e && e.code;
+  return c === 'not_granted' ? 'AI access was declined for this page. You can still edit scenes by hand.'
+    : c === 'rate_limited' ? `You've written a few scripts in a short time. Try again in ${waitText(e.retryAfter)}, or edit the scenes by hand.`
+    : c === 'daily_limit' ? "That's today's free scripts used up. Come back tomorrow, or keep editing these scenes by hand."
+    : c === 'site_busy' ? 'The free script writer is at capacity for today. Try again tomorrow, or edit the scenes by hand.'
+    : c === 'refused' ? 'Claude could not write a script for that idea. Try describing it differently.'
+    : c === 'unavailable' ? 'Script writing is switched off right now. You can still edit every scene by hand.'
+    : c === 'offline' ? 'Could not reach the script writer. Check your connection and try again.'
+    : c === 'invalid_json' || c === 'shape' ? 'The script came back in an unexpected shape. Try again, or rephrase your idea.'
+    : 'Could not write the script this time. Try again in a moment.';
+}
+let aiBusy = false;
 async function runAI(mode) {
-  const sample = await getCap('sample');
-  if (!sample) { setStatus(aiStatus, 'AI writing is not available in this view. You can still edit every scene by hand.', 'err'); return; }
-  let input;
+  if (aiBusy || exporting) return;
+  const web = window.RS_STANDALONE && window.RS_AI;
+  const sample = web ? null : await getCap('sample');
+  if (!web && !sample) { setStatus(aiStatus, 'AI writing is not available in this view. You can still edit every scene by hand.', 'err'); return; }
+  let input, req;
   if (mode === 'new') {
     const idea = $('#idea').value.trim();
     if (!idea) { setStatus(aiStatus, 'Describe your video idea first.', 'err'); $('#idea').focus(); return; }
+    req = { mode: 'new', idea: idea.slice(0, 600), format: $('#style').value, tone: $('#tone').value, length: +$('#length').value, aspect: project.aspect };
     input = `You write scripts for short social videos. ${SCHEMA}
 Target total length: about ${$('#length').value} seconds.
 Video format: ${$('#style').value}. Tone: ${$('#tone').value}. Aspect: ${project.aspect}.
@@ -1381,26 +1418,26 @@ Video idea from the creator: """${idea}"""`;
     const ask = $('#revise').value.trim();
     if (!ask) { setStatus(aiStatus, 'Type the change you want, then press Apply edit.', 'err'); $('#revise').focus(); return; }
     const current = project.scenes.map(s => ({ kind: s.kind, caption: s.caption, sub: s.sub, narration: s.narration, visual: s.visual, duration: s.duration, palette: [s.c1, s.c2] }));
+    if (!current.length) { setStatus(aiStatus, 'There is no script to change yet. Describe your video and press Write my video.', 'err'); return; }
+    req = { mode: 'revise', ask: ask.slice(0, 300), title: project.title, scenes: current.slice(0, 20), aspect: project.aspect };
     input = `You edit scripts for short social videos. Here is the current script as JSON:
 ${JSON.stringify({ title: project.title, scenes: current })}
 Apply this change requested by the creator: """${ask}"""
 Keep everything the creator did not ask to change. ${SCHEMA}`;
   }
-  const btns = [$('#gen'), $('#revise-btn')]; btns.forEach(b => b.disabled = true);
+  const btns = [$('#gen'), $('#revise-btn')]; btns.forEach(b => b.disabled = true); aiBusy = true;
+  const hadWork = !project.example && project.scenes.some(s => s.caption || s.narration);
   setStatus(aiStatus, `<span class="spin"></span> ${mode === 'new' ? 'Writing your script and scenes…' : 'Applying your edit…'}`);
   try {
-    const data = await sample.json(input, { modelTier: 'default' });
-    applyAI(data, mode !== 'new');
-    setStatus(aiStatus, `Done: ${project.scenes.length} scenes, ${fmt(total())} total. Press play to preview.`, 'ok');
+    const forSession = sessionN;
+    const data = web ? await window.RS_AI.write(req) : await sample.json(input, { modelTier: 'default' });
+    if (sessionN !== forSession) { setStatus(aiStatus, ''); return; } // a different project was opened meanwhile
+    applyAI(data, mode !== 'new'); stat('script_ok', mode === 'new' ? 'new' : 'revise');
+    setStatus(aiStatus, `Done: ${project.scenes.length} scenes, ${fmt(total())} total. Press play to preview.${hadWork ? ' Undo brings back your previous scenes.' : ''}`, 'ok');
     if (mode !== 'new') $('#revise').value = '';
   } catch (e) {
-    const c = e && e.code;
-    const msg = c === 'not_granted' ? 'AI access was declined for this page. You can still edit scenes by hand.'
-      : c === 'rate_limited' ? 'Too many requests just now. Wait a minute and try again.'
-      : c === 'invalid_json' || c === 'shape' ? 'The script came back in an unexpected shape. Try again, or rephrase your idea.'
-      : 'Could not write the script this time. Try again in a moment.';
-    setStatus(aiStatus, msg, 'err');
-  } finally { btns.forEach(b => b.disabled = false); }
+    setStatus(aiStatus, aiError(e), 'err'); stat('script_fail', e && e.code);
+  } finally { aiBusy = false; btns.forEach(b => b.disabled = !!exporting); }
 }
 $('#gen').addEventListener('click', () => runAI('new'));
 $('#revise-btn').addEventListener('click', () => runAI('revise'));
@@ -1418,6 +1455,8 @@ function pickMime() {
 function exportUI(on) {
   ['#render', '#render-all', '#gen', '#revise-btn', '#compose', '#proj-new'].forEach(sel => { const b = $(sel); if (b) b.disabled = on; });
   $('#cancel-render').hidden = !on; $('#render-bar').hidden = !on; $('#rec-badge').hidden = !on;
+  // Editing scenes, format or look mid-render would change the frames being encoded, so lock them until it ends.
+  document.querySelectorAll('.bench > .panel:not([aria-labelledby=h-export]), .monitor > .panel, .projbar, #proj-panel, #track').forEach(el => { el.inert = on; });
 }
 function progress(frac, label) { $('#render-fill').style.width = (clamp(frac, 0, 1) * 100).toFixed(1) + '%'; if (label) $('#rec-text').textContent = label; }
 function addResult(blob, ext, aspect) {
@@ -1440,7 +1479,7 @@ $('#results').addEventListener('click', async e => {
   const slug = (r.title || 'reelsmith-video').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'reelsmith-video';
   if (!dl) { st.textContent = 'Saving is not available here. Use the ⋮ menu on the video player to download it.'; return; }
   st.textContent = 'Waiting for you to confirm the save…';
-  try { await dl.save({ filename: `${slug}-${r.aspect.replace(':', 'x')}.${r.ext}`, data: r.blob }); st.textContent = 'Saved.'; }
+  try { await dl.save({ filename: `${slug}-${r.aspect.replace(':', 'x')}.${r.ext}`, data: r.blob }); st.textContent = 'Saved.'; stat('video_save', r.aspect); }
   catch (err) { st.textContent = err?.code === 'declined' ? 'Save cancelled.' : err?.code === 'too_large' ? 'The file is too large to save. Try a shorter video.' : 'The save did not go through. Try again.'; }
 });
 
@@ -1580,8 +1619,12 @@ function finishExport() { const job = exporting; setTimeout(() => { if (job && j
 async function runExport(aspects) {
   if (!project.scenes.length) { setStatus(rStatus, 'Add at least one scene first.', 'err'); return; }
   if (exporting) return;
+  if (composeP) { setStatus(rStatus, '<span class="spin"></span> Finishing the music first…'); await composeP; if (exporting) return; }
+  const busy = aiBusy ? 'the script' : VS.busy ? 'the voiceover' : imgJob ? 'the AI images' : promptBusy ? 'the prompts' : '';
+  if (busy) { setStatus(rStatus, `Wait for ${busy} to finish, then render.`, 'err'); return; }
   if (playing) pause();
   const orig = project.aspect; const job = { cancelled: false, label: '' }; exporting = job; exportUI(true);
+  stat('render_start', project.aspect);
   try { await document.fonts.ready; } catch (e) {}
   if (project.sfx.on) { try { await ensureSfx(); } catch (e) {} }
   let done = 0, speed = 0, realtime = false;
@@ -1590,23 +1633,32 @@ async function runExport(aspects) {
       if (job.cancelled) break;
       if (project.aspect !== a) { project.aspect = a; applyAspect(); }
       job.label = a; job.realtime = false; job.rec = null; progress(0, a);
-      let out;
+      let out, path = 'fast';
       if (FAST) {
         try { const b = await fastRender(job); out = b ? { blob: b, ext: 'mp4' } : null; speed = job.speed || speed; }
         catch (e) { out = undefined; }
       }
-      if (out === undefined && !job.cancelled) { realtime = true; out = await realtimeRender(job); }
-      if (out) { addResult(out.blob, out.ext, a); done++; }
+      if (out === undefined && !job.cancelled) { realtime = true; path = 'realtime'; out = await realtimeRender(job); }
+      if (out) { addResult(out.blob, out.ext, a); done++; stat('render_ok', path); }
     }
+    if (job.cancelled) stat('render_cancel');
+    if (done && window.RS_TRACK) $('#rate').hidden = rated;
     if (job.cancelled) setStatus(rStatus, done ? `Stopped. ${done} video${done > 1 ? 's' : ''} finished below.` : 'Render cancelled.');
     else setStatus(rStatus, `${done} video${done > 1 ? 's' : ''} ready below${speed && !realtime ? ` · rendered about ${speed.toFixed(1)}× faster than real time` : ''}.`, 'ok');
   } catch (e) {
+    stat('render_fail');
     setStatus(rStatus, e?.code === 'no_recorder' ? 'This browser cannot record video. Try Chrome, Edge or Safari on a computer.' : 'The render stopped unexpectedly. Try again.', 'err');
   } finally {
     if (project.aspect !== orig) { project.aspect = orig; applyAspect(); }
     exporting = null; exportUI(false); renderScenes(); seek(0);
   }
 }
+let rated = false;
+$('#rate').addEventListener('click', e => {
+  const b = e.target.closest('[data-rate]'); if (!b || rated) return;
+  rated = true; stat('rating', b.dataset.rate);
+  $('#rate').innerHTML = `<span class="hint">${b.dataset.rate === 'up' ? 'Glad to hear it. Thanks!' : 'Thanks for telling us. We read every one of these to decide what to fix next.'}</span>`;
+});
 $('#render').addEventListener('click', () => runExport([project.aspect]));
 $('#render-all').addEventListener('click', () => runExport([project.aspect, ...['16:9', '9:16', '1:1'].filter(a => a !== project.aspect)]));
 $('#cancel-render').addEventListener('click', () => {
@@ -1989,18 +2041,22 @@ function updateMusicUI() {
   $('#compose-again').hidden = !composed;
   $('#refit').hidden = !(composed && m.fit !== durSig());
 }
-let composing = false;
-async function compose(seed, quiet) {
-  if (!project.scenes.length || composing) return;
+let composing = false, composeP = null;
+function compose(seed, quiet) { if (composing) return composeP; composeP = composeRun(seed, quiet).finally(() => { composeP = null; }); return composeP; }
+async function composeRun(seed, quiet) {
+  if (!project.scenes.length) return;
+  const forSession = sessionN;
   if (!window.OfflineAudioContext) { setStatus($('#music-status'), 'This browser cannot compose music. Try Chrome, Edge or Safari on a computer.', 'err'); return; }
   const mood = MOODS[$('#mood').value] ? $('#mood').value : 'suspense'; const hits = $('#mood-hits').checked;
   const st = $('#music-status'); composing = true; $('#compose').disabled = true;
   setStatus(st, `<span class="spin"></span> Composing ${MOODS[mood].label.toLowerCase()} music for ${fmt(total())}…`);
   try {
     const blob = await renderScore(mood, seed, hits);
+    if (sessionN !== forSession) { setStatus(st, ''); return; } // another project was opened while this score rendered
     loadTrack('music', { url: URL.createObjectURL(blob), label: `${MOODS[mood].label} score · take ${String(seed % 1000).padStart(3, '0')}`, blob, loop: false });
     if (!quiet || !(project.music && project.music.kind === 'composed')) { tracks.music.vol = 0.8; $('#music-vol').value = 0.8; }
     project.music = { kind: 'composed', mood, seed, hits, fit: durSig() };
+    if (!quiet) stat('music_ok', mood);
     setStatus(st, quiet ? '' : `${MOODS[mood].label} score composed for your ${fmt(total())} cut. Press play to hear it.`, quiet ? '' : 'ok');
     updateMusicUI(); saveProject();
   } catch (e) {
@@ -2109,6 +2165,7 @@ function histCommit() {
   if (st === hist.last) return;
   hist.past.push(hist.last); if (hist.past.length > 100) hist.past.shift();
   hist.last = st; hist.future = []; updHist();
+  if (window.RS_STANDALONE && !project.pid) queueCloud(true);
 }
 function histPush() { if (hist.restoring) return; clearTimeout(hist.timer); hist.timer = setTimeout(histCommit, 450); }
 function restoreState(st) {
@@ -2199,8 +2256,10 @@ async function saveCloud() {
     if (cloud.again) { cloud.again = false; queueCloud(); }
   }
 }
-function queueCloud() { if (!cloud.ready || !project.pid || cloud.loading) return; clearTimeout(cloud.timer); cloud.timer = setTimeout(saveCloud, 2500); }
+function queueCloud(first) { if (!cloud.ready || (!project.pid && !first) || cloud.loading) return; clearTimeout(cloud.timer); cloud.timer = setTimeout(saveCloud, 2500); }
+let sessionN = 0; // bumps whenever a different project is opened, imported or started
 function resetSession() {
+  sessionN++;
   if (playing) pause();
   media.forEach(m => { if (m.kind === 'video' && m.el) { m.el.pause(); m.el.remove(); } }); media.clear();
   voices.forEach(v => { v.el.pause(); v.el.remove(); }); voices.clear();
@@ -2220,8 +2279,8 @@ async function openProject(pid, quiet) {
     await preloadAssets(assetIdsOf(snap.data().json));
     resetSession();
     project = normProject({ ...st, pid, example: false });
-    for (const m of st.media || []) if (m && m.assetId && (m.kind === 'image' || m.kind === 'video')) addMedia({ id: m.key, kind: m.kind, url: assetUrl(m.assetId), name: m.name, assetId: m.assetId });
-    for (const v of st.voices || []) { try { const a = await audioFromAsset(v.assetId); addVoice({ id: v.key, url: a.url, name: v.name, blob: a.blob, assetId: v.assetId }); } catch (e) {} }
+    for (const m of st.media || []) if (m && m.assetId && (m.kind === 'image' || m.kind === 'video')) addMedia({ id: safeId(m.key, 'm'), kind: m.kind, url: assetUrl(m.assetId), name: m.name, assetId: m.assetId });
+    for (const v of st.voices || []) { try { const a = await audioFromAsset(v.assetId); addVoice({ id: safeId(v.key, 'v'), url: a.url, name: v.name, blob: a.blob, assetId: v.assetId }); } catch (e) {} }
     project.scenes.forEach(s => { if (s.mediaId && !media.has(s.mediaId)) s.mediaId = null; if (s.voiceId && !voices.has(s.voiceId)) s.voiceId = null; });
     if (st.voiceTrack && st.voiceTrack.assetId) { try { const a = await audioFromAsset(st.voiceTrack.assetId); loadTrack('voice', { url: a.url, label: st.voiceTrack.name, blob: a.blob, assetId: st.voiceTrack.assetId, loop: false }); } catch (e) {} }
     if (st.logo && st.logo.assetId) { const img = new Image(); img.onload = () => { logo = img; $('#logo-clear').hidden = false; renderNow(); drawThumbs(); }; img.src = assetUrl(st.logo.assetId); logoMeta = { assetId: st.logo.assetId }; }
@@ -2274,7 +2333,7 @@ function blankProject() {
   project = normProject({ title: '', aspect: project.aspect, scenes: [{ caption: 'Your first scene', narration: '', visual: '', duration: 4, c1: '#1d2340', c2: '#5b3fa0' }] });
   if (brandKit) applyBrand(brandKit, true);
   syncControls(); applyAspect(); renderLibrary(); renderScenes(); seek(0); histInit();
-  setSave(cloud.ready ? 'Not saved yet' : '');
+  setSave(cloud.ready ? (window.RS_STANDALONE ? 'Edits save automatically in this browser' : 'Not saved yet') : '');
   try { localStorage.removeItem('reelsmith-last-pid'); } catch (e) {}
 }
 async function deleteProject(id) {
@@ -2347,7 +2406,7 @@ async function initCloud() {
   await loadBrand();
   if (!cloud.ready) { setSave(db ? 'Only editors of this page can save projects' : 'Sign in to save projects'); return; }
   let last = null; try { last = localStorage.getItem('reelsmith-last-pid'); } catch (e) {}
-  if (last) await openProject(last, true); else setSave(project.pid ? '' : 'Not saved yet');
+  if (last) await openProject(last, true); else setSave(project.pid ? '' : window.RS_STANDALONE ? 'Edits save automatically in this browser' : 'Not saved yet');
 }
 
 /* ---------- Project files (move a project between the Claude version and the standalone studio) ---------- */
@@ -2367,13 +2426,16 @@ function importProjectText(text) {
   syncControls(); applyAspect(); renderLibrary(); renderScenes(); seek(0); histInit();
   setSave(cloud.ready ? 'Not saved yet' : ''); try { localStorage.removeItem('reelsmith-last-pid'); } catch (e) {}
   if (project.music && project.music.kind === 'composed') { $('#mood').value = project.music.mood; $('#mood-hits').checked = project.music.hits !== false; compose(project.music.seed, true); }
-  setStatus(st, `Imported "${project.title || 'Untitled video'}" with ${project.scenes.length} scenes. Press Save project to keep it here.`, 'ok');
+  const autosave = window.RS_STANDALONE && cloud.ready;
+  setStatus(st, `Imported "${esc(project.title || 'Untitled video')}" with ${project.scenes.length} scenes.${autosave ? ' Saved in this browser.' : ' Press Save project to keep it here.'}`, 'ok');
+  if (autosave) saveCloud();
+  stat('project_import');
 }
 $('#proj-export').addEventListener('click', async () => {
   const st = $('#proj-status'); const text = projectText();
   const slug = (project.title || 'reelsmith-project').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'reelsmith-project';
   const dl = await getCap('downloads');
-  try { if (!dl) throw new Error('none'); await dl.save({ filename: `${slug}.reelsmith.json`, data: new Blob([text], { type: 'application/json' }) }); setStatus(st, 'Project file saved. Import it in the other version of Reelsmith.', 'ok'); }
+  try { if (!dl) throw new Error('none'); await dl.save({ filename: `${slug}.reelsmith.json`, data: new Blob([text], { type: 'application/json' }) }); setStatus(st, 'Project file saved. Import it in the other version of Reelsmith.', 'ok'); stat('project_export'); }
   catch (e) { const ta = $('#proj-text'); ta.closest('details').open = true; ta.value = text; ta.focus(); ta.select(); setStatus(st, 'Could not save a file here. The project is shown as text below: copy it and paste it into the other version.'); }
 });
 $('#proj-import').addEventListener('change', async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { importProjectText(await f.text()); } catch (err) { setStatus($('#proj-status'), 'Could not read that file.', 'err'); } });
@@ -2445,6 +2507,7 @@ async function vsGenerate(indices) {
   } catch (e) { failed = true; }
   VS.busy = false; VS.quiet = Date.now() + 2500; $('#vs-all').disabled = false; $('#vs-preview').disabled = false; $('#vs-stop').hidden = true; $('#vs-bar').hidden = true;
   renderScenes();
+  if (done) stat('voice_ok'); else if (failed) stat('voice_fail');
   if (failed && !done) vsFail();
   else setStatus(st, `${VS.stop ? 'Stopped. ' : ''}${done} scene${done === 1 ? '' : 's'} voiced with ${label}.${failed ? ' One scene failed; press Generate voice on it to retry.' : ' Scene lengths now follow the voice.'}`, done ? 'ok' : '');
 }
@@ -2466,15 +2529,21 @@ $('#vs-preview').addEventListener('click', async () => {
 /* ---------- Boot ---------- */
 ['#cap-font', '#title-font'].forEach(sel => { $(sel).innerHTML = Object.entries(FONTS).map(([k, f]) => `<option value="${k}">${f.label}</option>`).join(''); });
 if (!FAST) $('#render-hint').textContent = 'This browser records the video in real time, so a 30-second video takes about 30 seconds. Keep this tab open while it runs.';
-renderPresets(); syncControls(); applyAspect(); renderLibrary(); renderScenes(); renderFrame(0); updateUI(); histInit();
+renderPresets(); syncControls(); applyAspect(); renderLibrary(); renderScenes(); updateUI(); histInit();
+// The very first frame is blank by design (the caption fades in), so the idle preview opens on a poster frame instead.
+const poster = () => { if (!playing && curT === 0 && project.scenes.length) renderFrame(Math.min(0.9, total() * 0.5)); else renderNow(); };
+poster();
 const fontsReady = Promise.all([
   document.fonts.load('800 40px Syne'), document.fonts.load('700 40px Figtree'), document.fonts.load('900 40px Montserrat'), document.fonts.load('600 20px Montserrat'),
   document.fonts.load('700 20px Montserrat'), document.fonts.load('500 40px "JetBrains Mono"'), document.fonts.load(fontCss(project.capFont, 40)), document.fonts.load(fontCss(project.titleFont, 40))
 ]).catch(() => {});
-fontsReady.then(() => { renderNow(); drawThumbs(); });
+fontsReady.then(() => { poster(); drawThumbs(); });
 if (project.music && project.music.kind === 'composed') { $('#mood').value = project.music.mood; compose(project.music.seed, true); }
 if (project.sfx.on) queueSfx();
 initCloud();
+stat('visit');
+{ let errs = 0; window.addEventListener('error', () => { if (errs++ < 3) stat('js_error'); }); window.addEventListener('unhandledrejection', () => { if (errs++ < 3) stat('js_error'); }); }
+if (window.RS_STANDALONE && window.RS_AI) window.RS_AI.status().then(on => document.body.classList.toggle('ai-on', !!on)).catch(() => {});
 })();
 </script>
 </body>
