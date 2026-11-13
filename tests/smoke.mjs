@@ -26,18 +26,20 @@ async function newPage(ctx) {
   if (process.env.VENDOR_DIR) {
     await ctx.route('https://cdn.jsdelivr.net/npm/mp4-muxer@*/build/mp4-muxer.js', async r => r.fulfill({ contentType: 'text/javascript', body: await readFile(join(process.env.VENDOR_DIR, 'mp4-muxer.js')) }));
   }
+  const events = [];
+  await ctx.route(ORIGIN + '/api/event', r => { try { events.push(JSON.parse(r.request().postData() || '{}')); } catch {} r.fulfill({ status: 204 }); });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|net::ERR/.test(m.text())) errors.push('console: ' + m.text()); });
-  return { page, errors };
+  return { page, errors, events };
 }
 const status = (page, sel) => page.$eval(sel, el => el.textContent.trim());
 const canvasLit = page => page.$eval('#stage', c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let lit = 0; for (let i = 0; i < d.length; i += 4 * 97) if (d[i] + d[i + 1] + d[i + 2] > 30) lit++; return lit; });
 
 try {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
-  const { page, errors } = await newPage(ctx);
+  const { page, errors, events } = await newPage(ctx);
   await page.goto(ORIGIN + '/');
   await page.waitForFunction(() => document.querySelectorAll('.scene').length > 0);
 
@@ -112,6 +114,17 @@ try {
     const ok = await page.$eval('.res-item video', v => new Promise(r => { if (v.readyState >= 1) r(v.duration > 0.5); v.onloadedmetadata = () => r(v.duration > 0.5); v.onerror = () => r(false); setTimeout(() => r(false), 8000); }));
     check('rendered video is playable', ok);
   }
+  // Analytics and the rating prompt
+  check('rating prompt appears after a render', await page.isVisible('#rate'));
+  await page.click('[data-rate=up]');
+  check('rating thanks the visitor', /Thanks/.test(await status(page, '#rate')));
+  await page.waitForTimeout(300);
+  const names = events.map(x => x.e);
+  const n = e => names.filter(x => x === e).length;
+  check('analytics: a visit is counted on each page load', n('visit') >= 2, names.join(','));
+  check('analytics: hand edits are counted once per page load, not per keystroke', n('scene_edit') === 1, String(n('scene_edit')));
+  check('analytics: music, render and rating are counted', events.some(x => x.e === 'music_ok' && x.v === 'uplifting') && n('render_start') === 1 && events.some(x => x.e === 'render_ok' && ['fast', 'realtime'].includes(x.v)) && events.some(x => x.e === 'rating' && x.v === 'up'));
+  check('analytics: events carry no project content', events.every(x => Object.keys(x).every(k => k === 'e' || k === 'v') && (!x.v || x.v.length < 20)), JSON.stringify(events.find(x => Object.keys(x).length > 2) || ''));
   if (process.env.SHOTS) await page.screenshot({ path: join(process.env.SHOTS, 'desktop.png'), fullPage: false });
   check('no script errors on desktop', errors.length === 0, errors.slice(0, 5).join(' | '));
 
@@ -163,6 +176,51 @@ try {
     check('scenes are untouched when writing fails', (await p.$$('.scene')).length === 3);
     check('no script errors with the script writer on', a.errors.length === 0, a.errors.slice(0, 5).join(' | '));
     await actx.close();
+  }
+
+  // Visitors whose browser says "do not track" send nothing
+  {
+    const gctx = await browser.newContext();
+    await gctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get: () => true }));
+    const g = await newPage(gctx);
+    await g.page.goto(ORIGIN + '/'); await g.page.waitForFunction(() => document.querySelectorAll('.scene').length > 0);
+    await g.page.locator('.scene').first().locator('[data-f=caption]').fill('x'); await g.page.waitForTimeout(500);
+    check('Global Privacy Control: no analytics are sent', g.events.length === 0, String(g.events.length));
+    await gctx.close();
+  }
+
+  // Owner dashboard (stats.html) with made-up numbers from a stand-in /api/stats
+  {
+    const sctx = await browser.newContext({ viewport: { width: 1200, height: 1000 } });
+    const d = await newPage(sctx);
+    const fakeDays = Array.from({ length: 30 }, (_, i) => {
+      const v = 40 + Math.round(30 * Math.sin(i / 3) + i), made = Math.round(v * 0.55), rend = Math.round(made * 0.3), saved = Math.round(rend * 0.8);
+      return { date: new Date(Date.UTC(2026, 9, 15 + i)).toISOString().slice(0, 10),
+        counts: { visit: v + 5, script_ok: Math.round(made * 0.7), render_ok: rend, render_start: rend + 2, render_fail: 1, render_cancel: 1, video_save: saved, js_error: i % 7 === 0 ? 2 : 0, voice_ok: 3, voice_fail: 0 },
+        values: { rating: { up: 2, down: i % 4 === 0 ? 1 : 0 }, script_ok: { new: made, revise: 4 }, script_fail: { rate_limited: 1, refused: i % 10 === 0 ? 1 : 0 }, render_ok: { fast: rend - 1, realtime: 1 } },
+        visitors: { visit: v, made_something: made, render_ok: rend, video_save: saved, script_ok: Math.round(made * 0.6) },
+        server: { script_calls: made, tokens_in: made * 900, tokens_out: made * 1600 } };
+    });
+    await sctx.route(ORIGIN + '/api/stats*', r => {
+      const ok = r.request().headers().authorization === 'Bearer owner-key-123';
+      r.fulfill({ status: ok ? 200 : 401, contentType: 'application/json', body: JSON.stringify(ok ? { days: fakeDays } : { error: 'unauthorized' }) });
+    });
+    await d.page.goto(ORIGIN + '/stats.html');
+    check('dashboard asks for the key first', await d.page.isVisible('#login') && !(await d.page.isVisible('#report')));
+    await d.page.fill('#key', 'wrong-key'); await d.page.click('#login-form button');
+    await d.page.waitForFunction(() => /not accepted/.test(document.querySelector('#status').textContent));
+    check('dashboard rejects a wrong key', !(await d.page.isVisible('#report')));
+    await d.page.fill('#key', 'owner-key-123'); await d.page.click('#login-form button');
+    await d.page.waitForSelector('#report', { state: 'visible' });
+    check('dashboard shows the funnel with four steps', (await d.page.$$('#funnel .bar')).length === 4);
+    check('dashboard names the biggest drop-off', /Biggest drop: \d+% of people who made something never rendered/.test(await status(d.page, '#insight')), await status(d.page, '#insight'));
+    check('dashboard shows an estimated Claude cost', /\$\d+\.\d\d/.test(await status(d.page, '#ai')));
+    check('dashboard has a table view of every day', (await d.page.$$('#table tbody tr')).length === 30);
+    if (process.env.SHOTS) await d.page.screenshot({ path: join(process.env.SHOTS, 'stats.png'), fullPage: true });
+    await d.page.reload(); await d.page.waitForSelector('#report', { state: 'visible' });
+    check('dashboard remembers the key in this browser', true);
+    check('no script errors on the dashboard', d.errors.length === 0, d.errors.slice(0, 3).join(' | '));
+    await sctx.close();
   }
 
   // Phone layout

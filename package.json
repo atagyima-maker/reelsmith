@@ -7,6 +7,6 @@
     "@anthropic-ai/sdk": "^1.8.0"
   },
   "scripts": {
-    "test": "node tests/api.mjs && node tests/smoke.mjs"
+    "test": "node tests/api.mjs && node tests/analytics.mjs && node tests/smoke.mjs"
   }
 }

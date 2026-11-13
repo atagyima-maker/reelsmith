@@ -14,8 +14,12 @@ two with **My projects → Export project file / Import project file**.
 | `index.html` | The whole studio: layout, styles and editor code. |
 | `standalone.js` | Storage, downloads and the script-writer connection for a plain website. Projects, brand kit, photos, clips and voice clips are kept in this browser (IndexedDB). |
 | `api/script.js` | The script writer: a Vercel function that asks Claude for a script. It builds the prompt itself, checks every field, and applies rate limits. |
+| `api/event.js` | Anonymous usage counts (see Analytics below). |
+| `api/stats.js` + `stats.html` | Your private analytics dashboard. |
+| `api/_lib.js` | Helpers shared by the functions. |
 | `tts-worker.js` | The voice engine. Runs the open-source Kokoro model in the browser; the first use downloads about 90 MB, then it is cached. |
 | `tests/api.mjs` | Checks the script writer against a fake Anthropic API: what is sent, input checks, rate limits, every failure. No key, no cost. |
+| `tests/analytics.mjs` | Checks the analytics against a fake Redis: counting, privacy, flood limits, the dashboard key. |
 | `tests/smoke.mjs` | End-to-end check: drives the studio in headless Chromium (writing a script, play, edit, undo, looks, music, save and reload, import, render, phone layout). |
 | `.claude/agents/app-guardian.md` | A Claude Code agent that runs the checks, fixes what breaks and re-runs until they pass. Ask Claude Code to "use app-guardian". |
 
@@ -48,11 +52,34 @@ tier is enough): add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` fro
 integration in the Vercel Marketplace, and the limits then hold across the whole site.
 Without Redis the limits are approximate, which is why the spend limit in step 2 matters.
 
+## Analytics
+
+See where people drop off: visited → made something → rendered → saved, plus a 👍/👎 asked
+after each render, script-writer failures, render failures, page errors and the Claude bill.
+
+**Switch it on**
+1. Connect Upstash Redis (Vercel Marketplace → Upstash, free tier). This also makes the script
+   writer's rate limits exact.
+2. Add `REELSMITH_STATS_KEY` in Vercel: a long random password, at least 12 characters.
+3. Redeploy, then open `/stats.html` on your site and enter the key.
+
+**What is and is not collected.** The studio sends an event name from a fixed list (and at most
+one short value such as `9:16`). Nothing from projects, scripts, ideas or files is sent. A visitor
+is a hash of IP address + browser, mixed with a random salt that is replaced every day and deleted,
+so no one can be followed across days or identified, and no IP address is stored anywhere,
+including the rate limits. No cookies, nothing stored on the visitor's device, so no cookie
+banner is needed. Browsers that send Global Privacy Control or Do Not Track are not counted, and
+bots are ignored. Data is kept for 400 days.
+
+**Free-tier budget.** Each visit uses roughly 50–80 Upstash commands, so the free 500K
+commands a month covers about 6,000–10,000 visits. Opening the dashboard uses about 600.
+
 ## Test
 
 ```
 npm install
 node tests/api.mjs
+node tests/analytics.mjs
 node tests/smoke.mjs
 ```
 

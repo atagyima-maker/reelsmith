@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Reelsmith stats</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%2311131b%27/%3E%3Cpath d=%27M12 9v14l11-7z%27 fill=%27%23ff9a3c%27/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #11131b; --panel: #191c27; --raise: #222636; --line: #2c3144; --grid: #262a3a;
+  --fg: #ece9e2; --muted: #9097ab; --accent: #ff9a3c; --accent-ink: #1d1206; --bad: #ff4d5e; --good: #5fd39a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 20px max(16px, env(safe-area-inset-left)) 48px; }
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { margin: 0; font-size: 1.4rem; letter-spacing: -0.01em; } h1 span { color: var(--accent); }
+h2 { margin: 0 0 4px; font-size: 1rem; }
+.sub { margin: 0 0 12px; color: var(--muted); font-size: .85rem; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+button, select, input { font: inherit; color: var(--fg); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; }
+button { cursor: pointer; font-weight: 600; } button:hover { border-color: var(--muted); }
+.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+input { background: var(--bg); min-width: 0; flex: 1 1 220px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { color: var(--muted); font-size: .9rem; margin: 0; } .status.err { color: var(--bad); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.tile .l { color: var(--muted); font-size: .82rem; } .tile .v { font-size: 1.7rem; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.tile .d { color: var(--muted); font-size: .8rem; }
+.insight { border-left: 3px solid var(--accent); padding: 10px 14px; background: var(--raise); border-radius: 0 10px 10px 0; margin: 0; }
+.funnel { display: grid; grid-template-columns: minmax(110px, 190px) minmax(0, 1fr); gap: 10px 12px; align-items: center; }
+.funnel .lab { font-size: .88rem; } .funnel .lab small { display: block; color: var(--muted); font-size: .76rem; }
+.track { position: relative; height: 24px; display: flex; align-items: center; gap: 8px; }
+.bar { height: 22px; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+.val { font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cols { position: relative; height: 150px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--grid); padding-top: 18px; }
+.col { flex: 1 1 0; display: flex; align-items: flex-end; height: 100%; min-width: 0; cursor: default; }
+.col i { display: block; width: 100%; max-width: 24px; margin: 0 auto; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 1px; }
+.col:hover i, .col:focus-visible i { background: #ffb36b; }
+.axis { display: flex; justify-content: space-between; color: var(--muted); font-size: .75rem; margin-top: 4px; }
+.peak { position: absolute; top: 0; left: 0; color: var(--muted); font-size: .75rem; }
+#tip { position: fixed; pointer-events: none; background: #07080c; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-size: .8rem; z-index: 5; white-space: nowrap; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.list li { display: flex; justify-content: space-between; gap: 12px; font-size: .9rem; border-bottom: 1px solid var(--grid); padding-bottom: 6px; }
+.list li span:last-child { font-variant-numeric: tabular-nums; color: var(--fg); }
+.list li span:first-child { color: var(--muted); }
+details summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+.tbl { overflow-x: auto; margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: .82rem; font-variant-numeric: tabular-nums; }
+th, td { padding: 5px 8px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; } th { color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Reel<span>smith</span> stats</h1>
+    <div class="row" id="controls" hidden>
+      <select id="range" aria-label="Time range"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select>
+      <button id="refresh">Refresh</button>
+      <button id="forget">Sign out</button>
+    </div>
+  </header>
+
+  <section class="panel" id="login" hidden>
+    <h2>Sign in</h2>
+    <p class="sub">Enter the stats key you set as REELSMITH_STATS_KEY in Vercel. It is kept in this browser only.</p>
+    <form class="row" id="login-form"><input type="password" id="key" autocomplete="current-password" aria-label="Stats key" placeholder="Stats key"><button class="primary">Show stats</button></form>
+  </section>
+  <p class="status" id="status" aria-live="polite"></p>
+
+  <div id="report" hidden>
+    <div class="tiles" id="tiles"></div>
+    <p class="insight" id="insight" style="margin-top:16px"></p>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Where people drop off</h2>
+      <p class="sub">Each visitor is counted once per day. The percentage is the share of visitors who reached that step.</p>
+      <div class="funnel" id="funnel"></div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Visitors per day</h2>
+      <div class="cols" id="daily" role="img"></div>
+      <div class="axis" id="daily-axis"></div>
+    </section>
+
+    <div class="grid2" style="margin-top:16px">
+      <section class="panel"><h2>AI script writer</h2><p class="sub">Claude cost is an estimate from tokens used, at Opus 5.5 list prices.</p><ul class="list" id="ai"></ul></section>
+      <section class="panel"><h2>Quality</h2><p class="sub">Things that make people unhappy. Lower is better.</p><ul class="list" id="health"></ul></section>
+    </div>
+
+    <section class="panel" style="margin-top:16px">
+      <details><summary>Daily numbers as a table</summary><div class="tbl" id="table"></div></details>
+    </section>
+  </div>
+</div>
+<div id="tip" hidden></div>
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const KEY = 'reelsmith-stats-key';
+const store = { get() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }, set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (e) {} } };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const nf = n => n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'K' : n.toLocaleString();
+const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '–';
+const sum = (days, f) => days.reduce((a, d) => a + (f(d) || 0), 0);
+const shortDate = iso => new Date(iso + 'T12:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+const status = (t, err) => { $('#status').textContent = t; $('#status').className = 'status' + (err ? ' err' : ''); };
+
+async function load() {
+  const key = store.get();
+  if (!key) { $('#login').hidden = false; $('#controls').hidden = true; $('#report').hidden = true; $('#key').focus(); return; }
+  status('Loading…');
+  let r, body = null;
+  try { r = await fetch('api/stats?days=' + $('#range').value, { headers: { authorization: 'Bearer ' + key }, cache: 'no-store' }); body = await r.json(); }
+  catch (e) { status('Could not reach the stats service. Check your connection.', true); return; }
+  if (r.status === 401) { store.set(''); $('#login').hidden = false; $('#report').hidden = true; $('#controls').hidden = true; status('That key was not accepted.', true); return; }
+  if (!r.ok) { status(body && body.why ? `Stats are off: ${body.why}. See the README.` : 'Could not load the stats. Try again.', true); return; }
+  $('#login').hidden = true; $('#controls').hidden = false; $('#report').hidden = false; status('');
+  render(body.days);
+}
+
+function render(days) {
+  const V = e => sum(days, d => d.visitors[e]);
+  const C = e => sum(days, d => d.counts[e]);
+  const val = (e, v) => sum(days, d => (d.values[e] || {})[v]);
+  const visitors = V('visit'), made = V('made_something'), rendered = V('render_ok'), saved = V('video_save');
+  const up = val('rating', 'up'), down = val('rating', 'down');
+
+  const tiles = [
+    ['Visitors', nf(visitors), 'counted once per day'],
+    ['Made something', nf(made), pct(made, visitors) + ' of visitors'],
+    ['Rendered a video', nf(rendered), pct(rendered, visitors) + ' of visitors'],
+    ['Saved a video', nf(saved), pct(saved, visitors) + ' of visitors'],
+    ['Liked their video', up + down ? pct(up, up + down) : '–', `${up} 👍 · ${down} 👎`]
+  ];
+  $('#tiles').innerHTML = tiles.map(([l, v, d]) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`).join('');
+
+  const steps = [['Visited', 'opened the studio', visitors], ['Made something', 'edited scenes or wrote a script', made], ['Rendered', 'finished a video', rendered], ['Saved', 'downloaded the MP4', saved]];
+  const max = Math.max(1, visitors);
+  $('#funnel').innerHTML = steps.map(([l, s, n]) =>
+    `<div class="lab">${l}<small>${s}</small></div><div class="track"><div class="bar" style="width:calc(${(n / max * 100).toFixed(2)}% - 64px)"></div><span class="val">${nf(n)} · ${pct(n, visitors)}</span></div>`).join('');
+
+  // The single most useful sentence: where is the biggest leak?
+  let worst = null;
+  for (let i = 1; i < steps.length; i++) {
+    const [prevL, , a] = steps[i - 1], [l, , b] = steps[i];
+    if (a >= 5) { const lost = 1 - b / a; if (!worst || lost > worst.lost) worst = { lost, from: prevL, to: l, a }; }
+  }
+  $('#insight').textContent = visitors < 20 ? 'Not enough visitors yet to read much into these numbers. Share the site and check back.'
+    : worst ? `Biggest drop: ${Math.round(worst.lost * 100)}% of people who ${worst.from.toLowerCase()} never ${worst.to.toLowerCase()}. Fix that step first.`
+    : 'No clear drop-off yet.';
+
+  // Visitors per day: a single-series column chart with a hover tooltip; the table below has every number.
+  const peak = Math.max(1, ...days.map(d => d.visitors.visit));
+  $('#daily').setAttribute('aria-label', `Visitors per day, peak ${peak}`);
+  $('#daily').innerHTML = `<span class="peak">${nf(peak)}</span>` + days.map(d =>
+    `<div class="col" tabindex="0" data-tip="${shortDate(d.date)}: ${d.visitors.visit} visitors, ${d.visitors.render_ok} rendered"><i style="height:${(d.visitors.visit / peak * 100).toFixed(1)}%"></i></div>`).join('');
+  $('#daily-axis').innerHTML = `<span>${shortDate(days[0].date)}</span><span>${shortDate(days[days.length - 1].date)}</span>`;
+
+  const tin = sum(days, d => d.server.tokens_in), tout = sum(days, d => d.server.tokens_out), calls = sum(days, d => d.server.script_calls);
+  const cost = tin / 1e6 * 4 + tout / 1e6 * 20;
+  const fails = ['rate_limited', 'daily_limit', 'site_busy', 'refused', 'shape', 'failed', 'offline', 'unavailable'].map(v => [v, val('script_fail', v)]).filter(([, n]) => n);
+  const failLabel = { rate_limited: 'Hit the hourly limit', daily_limit: 'Hit the daily limit', site_busy: 'Site-wide daily cap reached', refused: 'Claude declined the idea', shape: 'Came back malformed', failed: 'Server or API error', offline: 'Visitor offline', unavailable: 'Writer switched off' };
+  $('#ai').innerHTML = [
+    ['Scripts written', nf(C('script_ok'))], ['  new / edits', `${nf(val('script_ok', 'new'))} / ${nf(val('script_ok', 'revise'))}`],
+    ['Visitors who wrote one', `${nf(V('script_ok'))} · ${pct(V('script_ok'), visitors)}`],
+    ['Claude calls', nf(calls)], ['Estimated Claude cost', '$' + cost.toFixed(2) + (calls ? ` · ${(cost / calls * 100).toFixed(1)}¢ each` : '')],
+    ...fails.map(([v, n]) => ['Failed: ' + failLabel[v], nf(n)])
+  ].map(([a, b]) => `<li><span>${esc(a)}</span><span>${esc(b)}</span></li>`).join('');
+
+  const starts = C('render_start');
+  $('#health').innerHTML = [
+    ['Renders started', nf(starts)], ['Renders that failed', `${nf(C('render_fail'))} · ${pct(C('render_fail'), starts)}`],
+    ['Renders cancelled', `${nf(C('render_cancel'))} · ${pct(C('render_cancel'), starts)}`],
+    ['Slow real-time renders (old browser)', `${nf(val('render_ok', 'realtime'))} · ${pct(val('render_ok', 'realtime'), C('render_ok'))}`],
+    ['AI voice failed', `${nf(C('voice_fail'))} of ${nf(C('voice_ok') + C('voice_fail'))}`],
+    ['Script errors in the page', nf(C('js_error'))],
+    ['Disliked their video', nf(down)]
+  ].map(([a, b]) => `<li><span>${esc(a)}</span><span>${esc(b)}</span></li>`).join('');
+
+  const cols = [['Visitors', d => d.visitors.visit], ['Made something', d => d.visitors.made_something], ['Scripts', d => d.counts.script_ok], ['Renders', d => d.counts.render_ok], ['Saves', d => d.counts.video_save], ['👍', d => (d.values.rating || {}).up], ['👎', d => (d.values.rating || {}).down], ['Errors', d => d.counts.js_error]];
+  $('#table').innerHTML = `<table><thead><tr><th>Date</th>${cols.map(([h]) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${days.slice().reverse().map(d => `<tr><td>${d.date}</td>${cols.map(([, f]) => `<td>${f(d) || 0}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+const tip = $('#tip');
+const showTip = (el, x, y) => { tip.textContent = el.dataset.tip; tip.hidden = false; const w = tip.offsetWidth; tip.style.left = Math.min(innerWidth - w - 8, Math.max(8, x - w / 2)) + 'px'; tip.style.top = (y - 40) + 'px'; };
+$('#daily').addEventListener('pointermove', e => { const c = e.target.closest('.col'); if (c) showTip(c, e.clientX, e.clientY); else tip.hidden = true; });
+$('#daily').addEventListener('pointerleave', () => { tip.hidden = true; });
+$('#daily').addEventListener('focusin', e => { const c = e.target.closest('.col'); if (c) { const r = c.getBoundingClientRect(); showTip(c, r.left + r.width / 2, r.top); } });
+$('#daily').addEventListener('focusout', () => { tip.hidden = true; });
+
+$('#login-form').addEventListener('submit', e => { e.preventDefault(); const k = $('#key').value.trim(); if (k) { store.set(k); $('#key').value = ''; load(); } });
+$('#range').addEventListener('change', load);
+$('#refresh').addEventListener('click', load);
+$('#forget').addEventListener('click', () => { store.set(''); load(); });
+load();
+})();
+</script>
+</body>
+</html>

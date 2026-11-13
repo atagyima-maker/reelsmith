@@ -137,6 +137,14 @@
     }
   };
 
+  /* ---- Anonymous usage counts: api/event.js. Skipped when the browser asks not to be tracked. ---- */
+  const noTrack = navigator.globalPrivacyControl === true || navigator.doNotTrack === '1';
+  window.RS_TRACK = (e, v) => {
+    if (noTrack) return;
+    const body = JSON.stringify(v ? { e, v } : { e });
+    try { if (!(navigator.sendBeacon && navigator.sendBeacon('api/event', new Blob([body], { type: 'text/plain' })))) fetch('api/event', { method: 'POST', body, keepalive: true }).catch(() => {}); } catch (err) {}
+  };
+
   const user = { canEdit: async () => true };
   const caps = { db, assets, downloads, user };
   // Script writing and AI images ('sample') only exist in the Claude version, so they resolve to null here.

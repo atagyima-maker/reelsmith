@@ -514,10 +514,12 @@ body:not(.standalone) .manual-only, body.ai-on .manual-only { display: none !imp
         </div>
         <div class="bar" id="render-bar" hidden><i id="render-fill"></i></div>
         <p class="status" id="render-status" aria-live="polite"></p>
+        <div class="row" id="rate" hidden><span class="hint">How did your video turn out?</span><button class="small" data-rate="up">👍 Love it</button><button class="small" data-rate="down">👎 Not great</button></div>
         <div class="results" id="results"></div>
       </section>
     </div>
   </div>
+  <p class="hint standalone-only" style="font-size:.75rem;text-align:center;margin-top:8px">Reelsmith counts anonymous usage, like how many videos get rendered, to decide what to improve. No cookies, nothing that identifies you, and nothing if your browser asks not to be tracked.</p>
 </div>
 <div id="vid-host" aria-hidden="true"></div>
 
@@ -526,6 +528,9 @@ body:not(.standalone) .manual-only, body.ai-on .manual-only { display: none !imp
 <script>
 (() => {
 const $ = s => document.querySelector(s);
+// Anonymous usage counts (website only, see api/event.js). Never blocks or breaks the studio.
+const stat = (e, v) => { try { if (window.RS_TRACK) window.RS_TRACK(e, v); } catch (err) {} };
+const statOnce = (() => { const seen = new Set(); return (e, v) => { if (!seen.has(e)) { seen.add(e); stat(e, v); } }; })();
 const ASPECTS = { '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [960, 960] };
 let uid = 1;
 const nid = p => (p || 's') + Date.now().toString(36) + (uid++);
@@ -663,7 +668,8 @@ function renderLibrary() {
   $('#autofill').disabled = media.size === 0;
 }
 $('#media-in').addEventListener('change', e => {
-  [...e.target.files].forEach(addMediaFile); e.target.value = '';
+  const kinds = [...e.target.files].map(f => { const id = addMediaFile(f); return id && media.get(id).kind; }).filter(Boolean); e.target.value = '';
+  if (kinds.length) stat('media_add', kinds.includes('video') ? 'video' : 'image');
   renderLibrary(); renderScenes();
 });
 $('#autofill').addEventListener('click', () => {
@@ -1071,7 +1077,7 @@ $('#scenes').addEventListener('input', e => {
   else if (f === 'trimIn') { const v = parseFloat(e.target.value); s.trimIn = isNaN(v) ? 0 : clamp(v, 0, 3600); syncVideos(curT, playing); }
   else if (f === 'duration') { const v = parseFloat(e.target.value); if (!isNaN(v)) s.duration = clamp(v, 1, 30); renderTrack(); updateSceneTimes(); updateMusicUI(); }
   else return;
-  markEdited(); updateScript(); drawThumbs(); if (!playing) renderNow(); saveProject();
+  markEdited(); updateScript(); drawThumbs(); if (!playing) renderNow(); saveProject(); statOnce('scene_edit');
 });
 $('#scenes').addEventListener('change', e => {
   const art = e.target.closest('.scene'); if (!art) return; const s = sceneById(art.dataset.id); if (!s) return;
@@ -1080,7 +1086,7 @@ $('#scenes').addEventListener('change', e => {
     const id = addVoiceFile(e.target.files[0]); e.target.value = ''; if (id) { s.voiceId = id; markEdited(); renderScenes(); }
   }
   else if (e.target.id === 'up-' + s.id && e.target.files[0]) {
-    const id = addMediaFile(e.target.files[0]); if (id) { s.mediaId = id; renderLibrary(); markEdited(); renderScenes(); renderNow(); }
+    const id = addMediaFile(e.target.files[0]); if (id) { stat('media_add', media.get(id).kind); s.mediaId = id; renderLibrary(); markEdited(); renderScenes(); renderNow(); }
   }
 });
 $('#scenes').addEventListener('click', e => {
@@ -1426,11 +1432,11 @@ Keep everything the creator did not ask to change. ${SCHEMA}`;
     const forSession = sessionN;
     const data = web ? await window.RS_AI.write(req) : await sample.json(input, { modelTier: 'default' });
     if (sessionN !== forSession) { setStatus(aiStatus, ''); return; } // a different project was opened meanwhile
-    applyAI(data, mode !== 'new');
+    applyAI(data, mode !== 'new'); stat('script_ok', mode === 'new' ? 'new' : 'revise');
     setStatus(aiStatus, `Done: ${project.scenes.length} scenes, ${fmt(total())} total. Press play to preview.${hadWork ? ' Undo brings back your previous scenes.' : ''}`, 'ok');
     if (mode !== 'new') $('#revise').value = '';
   } catch (e) {
-    setStatus(aiStatus, aiError(e), 'err');
+    setStatus(aiStatus, aiError(e), 'err'); stat('script_fail', e && e.code);
   } finally { aiBusy = false; btns.forEach(b => b.disabled = !!exporting); }
 }
 $('#gen').addEventListener('click', () => runAI('new'));
@@ -1473,7 +1479,7 @@ $('#results').addEventListener('click', async e => {
   const slug = (r.title || 'reelsmith-video').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'reelsmith-video';
   if (!dl) { st.textContent = 'Saving is not available here. Use the ⋮ menu on the video player to download it.'; return; }
   st.textContent = 'Waiting for you to confirm the save…';
-  try { await dl.save({ filename: `${slug}-${r.aspect.replace(':', 'x')}.${r.ext}`, data: r.blob }); st.textContent = 'Saved.'; }
+  try { await dl.save({ filename: `${slug}-${r.aspect.replace(':', 'x')}.${r.ext}`, data: r.blob }); st.textContent = 'Saved.'; stat('video_save', r.aspect); }
   catch (err) { st.textContent = err?.code === 'declined' ? 'Save cancelled.' : err?.code === 'too_large' ? 'The file is too large to save. Try a shorter video.' : 'The save did not go through. Try again.'; }
 });
 
@@ -1618,6 +1624,7 @@ async function runExport(aspects) {
   if (busy) { setStatus(rStatus, `Wait for ${busy} to finish, then render.`, 'err'); return; }
   if (playing) pause();
   const orig = project.aspect; const job = { cancelled: false, label: '' }; exporting = job; exportUI(true);
+  stat('render_start', project.aspect);
   try { await document.fonts.ready; } catch (e) {}
   if (project.sfx.on) { try { await ensureSfx(); } catch (e) {} }
   let done = 0, speed = 0, realtime = false;
@@ -1626,23 +1633,32 @@ async function runExport(aspects) {
       if (job.cancelled) break;
       if (project.aspect !== a) { project.aspect = a; applyAspect(); }
       job.label = a; job.realtime = false; job.rec = null; progress(0, a);
-      let out;
+      let out, path = 'fast';
       if (FAST) {
         try { const b = await fastRender(job); out = b ? { blob: b, ext: 'mp4' } : null; speed = job.speed || speed; }
         catch (e) { out = undefined; }
       }
-      if (out === undefined && !job.cancelled) { realtime = true; out = await realtimeRender(job); }
-      if (out) { addResult(out.blob, out.ext, a); done++; }
+      if (out === undefined && !job.cancelled) { realtime = true; path = 'realtime'; out = await realtimeRender(job); }
+      if (out) { addResult(out.blob, out.ext, a); done++; stat('render_ok', path); }
     }
+    if (job.cancelled) stat('render_cancel');
+    if (done && window.RS_TRACK) $('#rate').hidden = rated;
     if (job.cancelled) setStatus(rStatus, done ? `Stopped. ${done} video${done > 1 ? 's' : ''} finished below.` : 'Render cancelled.');
     else setStatus(rStatus, `${done} video${done > 1 ? 's' : ''} ready below${speed && !realtime ? ` · rendered about ${speed.toFixed(1)}× faster than real time` : ''}.`, 'ok');
   } catch (e) {
+    stat('render_fail');
     setStatus(rStatus, e?.code === 'no_recorder' ? 'This browser cannot record video. Try Chrome, Edge or Safari on a computer.' : 'The render stopped unexpectedly. Try again.', 'err');
   } finally {
     if (project.aspect !== orig) { project.aspect = orig; applyAspect(); }
     exporting = null; exportUI(false); renderScenes(); seek(0);
   }
 }
+let rated = false;
+$('#rate').addEventListener('click', e => {
+  const b = e.target.closest('[data-rate]'); if (!b || rated) return;
+  rated = true; stat('rating', b.dataset.rate);
+  $('#rate').innerHTML = `<span class="hint">${b.dataset.rate === 'up' ? 'Glad to hear it. Thanks!' : 'Thanks for telling us. We read every one of these to decide what to fix next.'}</span>`;
+});
 $('#render').addEventListener('click', () => runExport([project.aspect]));
 $('#render-all').addEventListener('click', () => runExport([project.aspect, ...['16:9', '9:16', '1:1'].filter(a => a !== project.aspect)]));
 $('#cancel-render').addEventListener('click', () => {
@@ -2040,6 +2056,7 @@ async function composeRun(seed, quiet) {
     loadTrack('music', { url: URL.createObjectURL(blob), label: `${MOODS[mood].label} score · take ${String(seed % 1000).padStart(3, '0')}`, blob, loop: false });
     if (!quiet || !(project.music && project.music.kind === 'composed')) { tracks.music.vol = 0.8; $('#music-vol').value = 0.8; }
     project.music = { kind: 'composed', mood, seed, hits, fit: durSig() };
+    if (!quiet) stat('music_ok', mood);
     setStatus(st, quiet ? '' : `${MOODS[mood].label} score composed for your ${fmt(total())} cut. Press play to hear it.`, quiet ? '' : 'ok');
     updateMusicUI(); saveProject();
   } catch (e) {
@@ -2412,12 +2429,13 @@ function importProjectText(text) {
   const autosave = window.RS_STANDALONE && cloud.ready;
   setStatus(st, `Imported "${esc(project.title || 'Untitled video')}" with ${project.scenes.length} scenes.${autosave ? ' Saved in this browser.' : ' Press Save project to keep it here.'}`, 'ok');
   if (autosave) saveCloud();
+  stat('project_import');
 }
 $('#proj-export').addEventListener('click', async () => {
   const st = $('#proj-status'); const text = projectText();
   const slug = (project.title || 'reelsmith-project').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'reelsmith-project';
   const dl = await getCap('downloads');
-  try { if (!dl) throw new Error('none'); await dl.save({ filename: `${slug}.reelsmith.json`, data: new Blob([text], { type: 'application/json' }) }); setStatus(st, 'Project file saved. Import it in the other version of Reelsmith.', 'ok'); }
+  try { if (!dl) throw new Error('none'); await dl.save({ filename: `${slug}.reelsmith.json`, data: new Blob([text], { type: 'application/json' }) }); setStatus(st, 'Project file saved. Import it in the other version of Reelsmith.', 'ok'); stat('project_export'); }
   catch (e) { const ta = $('#proj-text'); ta.closest('details').open = true; ta.value = text; ta.focus(); ta.select(); setStatus(st, 'Could not save a file here. The project is shown as text below: copy it and paste it into the other version.'); }
 });
 $('#proj-import').addEventListener('change', async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { importProjectText(await f.text()); } catch (err) { setStatus($('#proj-status'), 'Could not read that file.', 'err'); } });
@@ -2489,6 +2507,7 @@ async function vsGenerate(indices) {
   } catch (e) { failed = true; }
   VS.busy = false; VS.quiet = Date.now() + 2500; $('#vs-all').disabled = false; $('#vs-preview').disabled = false; $('#vs-stop').hidden = true; $('#vs-bar').hidden = true;
   renderScenes();
+  if (done) stat('voice_ok'); else if (failed) stat('voice_fail');
   if (failed && !done) vsFail();
   else setStatus(st, `${VS.stop ? 'Stopped. ' : ''}${done} scene${done === 1 ? '' : 's'} voiced with ${label}.${failed ? ' One scene failed; press Generate voice on it to retry.' : ' Scene lengths now follow the voice.'}`, done ? 'ok' : '');
 }
@@ -2522,6 +2541,8 @@ fontsReady.then(() => { poster(); drawThumbs(); });
 if (project.music && project.music.kind === 'composed') { $('#mood').value = project.music.mood; compose(project.music.seed, true); }
 if (project.sfx.on) queueSfx();
 initCloud();
+stat('visit');
+{ let errs = 0; window.addEventListener('error', () => { if (errs++ < 3) stat('js_error'); }); window.addEventListener('unhandledrejection', () => { if (errs++ < 3) stat('js_error'); }); }
 if (window.RS_STANDALONE && window.RS_AI) window.RS_AI.status().then(on => document.body.classList.toggle('ai-on', !!on)).catch(() => {});
 })();
 </script>

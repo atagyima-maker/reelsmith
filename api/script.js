@@ -13,6 +13,9 @@
 // UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN, REELSMITH_PER_HOUR, REELSMITH_PER_DAY,
 // REELSMITH_SITE_PER_DAY.
 import Anthropic from '@anthropic-ai/sdk';
+import { createHash } from 'node:crypto';
+import { json, redis, redisConfigured, sameSite, clientIp } from './_lib.js';
+import { recordServerEvent } from './event.js';
 
 export const maxDuration = 60;
 
@@ -64,30 +67,21 @@ const SCRIPT_SCHEMA = {
   additionalProperties: false
 };
 
-const json = (status, body, headers = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
 const str = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, max) : '');
 const clampN = (v, a, b, d) => (Number.isFinite(+v) ? Math.min(b, Math.max(a, +v)) : d);
 
 /* ---------- Rate limits ---------- */
 const mem = new Map();
 async function hit(key, ttl) {
-  const url = process.env.UPSTASH_REDIS_REST_URL, token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (url && token) {
-    const r = await fetch(url.replace(/\/$/, '') + '/pipeline', {
-      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify([['INCR', key], ['EXPIRE', key, String(ttl), 'NX']])
-    });
-    if (!r.ok) throw new Error('limit store ' + r.status);
-    const out = await r.json();
-    return Number(out[0] && out[0].result) || 0;
-  }
+  if (redisConfigured()) { const out = await redis([['INCR', key], ['EXPIRE', key, ttl, 'NX']]); return Number(out[0]) || 0; }
   const now = Date.now(); const e = mem.get(key);
   if (!e || e.exp <= now) { mem.set(key, { n: 1, exp: now + ttl * 1000 }); return 1; }
   e.n++; return e.n;
 }
 // Returns null when allowed, or { code, retryAfter } when a limit is reached.
-async function overLimit(ip) {
+async function overLimit(rawIp) {
+  // Limits are keyed by a keyed hash of the IP address, so the store never holds an address.
+  const ip = createHash('sha256').update(`${process.env.ANTHROPIC_API_KEY}|${rawIp}`).digest('hex').slice(0, 20);
   const hour = Math.floor(Date.now() / 3600e3), day = Math.floor(Date.now() / 86400e3);
   const ttlH = 3600 - Math.floor(Date.now() / 1000) % 3600, ttlD = 86400 - Math.floor(Date.now() / 1000) % 86400;
   // Per-visitor limits first, so one visitor hammering the button cannot use up the site-wide budget.
@@ -146,12 +140,6 @@ function cleanScript(d) {
 
 /* ---------- Handlers ---------- */
 const enabled = () => !!process.env.ANTHROPIC_API_KEY;
-function sameSite(request) {
-  const origin = request.headers.get('origin');
-  if (!origin) return true; // same-origin fetches from some browsers omit it; other sites always send it on POST
-  try { return new URL(origin).host === (request.headers.get('x-forwarded-host') || request.headers.get('host')); } catch { return false; }
-}
-const clientIp = request => (request.headers.get('x-real-ip') || (request.headers.get('x-forwarded-for') || '').split(',')[0] || 'unknown').trim().slice(0, 64);
 
 export async function GET() {
   return json(200, { enabled: enabled() });
@@ -189,6 +177,8 @@ export async function handlePost(request, client) {
       fallbacks: 'default',
       messages: [{ role: 'user', content: userPrompt(q) }]
     });
+    const u = msg.usage || {};
+    await Promise.all([recordServerEvent('script_calls', 1), recordServerEvent('tokens_in', (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)), recordServerEvent('tokens_out', u.output_tokens || 0)]);
     if (msg.stop_reason === 'refusal') return json(422, { error: 'refused' });
     if (msg.stop_reason === 'max_tokens') return json(502, { error: 'shape' });
     const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('');

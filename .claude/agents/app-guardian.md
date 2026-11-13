@@ -12,7 +12,7 @@ framework, no new dependencies beyond `@anthropic-ai/sdk`.
 
 ## Your loop
 
-1. **Baseline.** Run `npm install`, `node tests/api.mjs` and `node tests/smoke.mjs` before you touch anything. If jsDelivr is blocked where you
+1. **Baseline.** Run `npm install` and `npm test` (api, analytics and browser checks) before you touch anything. If jsDelivr is blocked where you
    run, fetch the MP4 writer with `npm pack mp4-muxer@5.2.2` in a scratch folder, unpack it and run with
    `VENDOR_DIR=<that>/package/build`. Add `SHOTS=<dir>` to get desktop and phone screenshots, and look
    at them: a passing test with an ugly or empty screen is still a failure.
@@ -39,6 +39,9 @@ framework, no new dependencies beyond `@anthropic-ai/sdk`.
   checked form fields; never let the browser send prompt text. Keep the size caps, the rate limits
   and the same-site check, and add a check in `tests/api.mjs` for any new field. Never call the real
   API from tests.
+- **Analytics must stay anonymous.** Events are names from the fixed list in `api/event.js` plus at
+  most one allow-listed value. Never send project text, file names, ideas or ids, never store an IP
+  address (hash it), never set a cookie. `tests/analytics.mjs` scans the store for leaks; keep that.
 - **Browser support.** Fast render needs WebCodecs on an https page; otherwise it falls back to
   real-time recording. Both paths must end with a playable video.
 
