@@ -34,6 +34,9 @@ script writer switches on when you add an API key.
 
 Three ways a script can be paid for. You choose which are on.
 
+**Never want to pay?** Don't add `ANTHROPIC_API_KEY` to Vercel at all. Visitors then write with their own
+key, and with no key on the server there is nothing of yours to spend, whatever happens in the code.
+
 | Way | Who pays | How it is switched on |
 | --- | --- | --- |
 | **Visitor's own key** | The visitor | Always available. A visitor pastes their own Anthropic API key; the browser sends it straight to Anthropic, and your server never sees it. It is kept on their device only if they tick "remember". |

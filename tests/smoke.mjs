@@ -51,6 +51,7 @@ try {
   await page.fill('#idea', 'A short video about bees');
   await page.click('#gen');
   check('without a code or key, Write asks for one instead of spending anything', await page.isVisible('#ai-access') && !(await page.isVisible('#invite-row')) && (await page.$$('.scene')).length === 6);
+  check('people without a key are told how to get one, and that AI is optional', await page.isVisible('#no-key-help') && /console\.anthropic\.com/.test(await status(page, '#no-key-help')) && /by hand/.test(await status(page, '#no-key-help')));
   await page.click('#ai-access-close'); await page.fill('#idea', '');
 
   // Playback
