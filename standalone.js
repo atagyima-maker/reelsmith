@@ -120,18 +120,70 @@
     }
   };
 
-  /* ---- AI script writing: the site's /api/script function (Claude), only when the server has a key ---- */
+  /* ---- AI script writing, paid for one of three ways ----
+     own key: the visitor's Anthropic key goes straight from this browser to Anthropic with the official
+              SDK. Reelsmith's server never sees it. Kept in this browser only if they tick "remember".
+     invite:  the site owner's key, through /api/script, with an invite code the owner handed out.
+     open:    the site owner's key for anyone (only when the owner switched that on). */
   const aiErr = (code, extra) => Object.assign(new Error(code), { code }, extra || {});
+  const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.8.0/+esm';
+  const OWN_KEY = 'reelsmith-own-key', INVITE_KEY = 'reelsmith-invite';
+  const ls = {
+    get(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set(k, v) { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} }
+  };
+  const held = { own: ls.get(OWN_KEY), invite: ls.get(INVITE_KEY) };
+  let server = { enabled: false, invite: false, open: false };
+
+  async function writeWithOwnKey(req) {
+    let P, Anthropic;
+    try { [P, { default: Anthropic }] = await Promise.all([import('./script-prompt.js'), import(SDK_URL)]); }
+    catch (e) { throw aiErr('offline'); }
+    const q = P.readRequest(req); if (!q) throw aiErr('bad_request');
+    const client = new Anthropic({ apiKey: held.own, dangerouslyAllowBrowser: true, maxRetries: 1 });
+    let msg;
+    try { msg = await client.beta.messages.create(P.scriptParams(q)); }
+    catch (e) {
+      if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) { window.RS_AI.forget('own'); throw aiErr('bad_key'); }
+      if (e instanceof Anthropic.RateLimitError) throw aiErr('key_rate_limited');
+      if (e instanceof Anthropic.BadRequestError) throw aiErr(/credit/i.test(e.message || '') ? 'no_credit' : 'failed');
+      if (e instanceof Anthropic.APIConnectionError) throw aiErr('offline');
+      throw aiErr('failed');
+    }
+    const out = P.readScriptMessage(msg);
+    if (out.error) throw aiErr(out.error);
+    return out.data;
+  }
+
   window.RS_AI = {
+    // What the site's own writer allows: { enabled, invite, open }.
     async status() {
-      try { const r = await fetch('api/script', { cache: 'no-store' }); return r.ok && (await r.json()).enabled === true; } catch (e) { return false; }
+      try { const r = await fetch('api/script', { cache: 'no-store' }); if (r.ok) { const b = await r.json(); server = { enabled: !!b.enabled, invite: !!b.invite, open: !!b.open }; } } catch (e) {}
+      return server;
+    },
+    // How the next script would be paid for: 'own' | 'invite' | 'open' | null (needs a code or a key).
+    access() { return held.own ? 'own' : held.invite && server.invite ? 'invite' : server.open ? 'open' : null; },
+    remembered() { return !!ls.get(OWN_KEY); },
+    looksLikeKey: k => /^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(k),
+    setOwnKey(key, remember) { held.own = key; ls.set(OWN_KEY, remember ? key : ''); },
+    setInvite(code) { held.invite = code; ls.set(INVITE_KEY, code); },
+    forget(which) {
+      if (which !== 'invite') { held.own = ''; ls.set(OWN_KEY, ''); }
+      if (which !== 'own') { held.invite = ''; ls.set(INVITE_KEY, ''); }
     },
     async write(req) {
+      const how = this.access();
+      if (!how) throw aiErr('needs_access');
+      if (how === 'own') return writeWithOwnKey(req);
+      const headers = { 'content-type': 'application/json' };
+      if (how === 'invite') headers['x-reelsmith-invite'] = held.invite;
       let r;
-      try { r = await fetch('api/script', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) }); }
+      try { r = await fetch('api/script', { method: 'POST', headers, body: JSON.stringify(req) }); }
       catch (e) { throw aiErr('offline'); }
       let body = null; try { body = await r.json(); } catch (e) {}
-      if (!r.ok) throw aiErr((body && body.error) || 'failed', { retryAfter: body && body.retryAfter });
+      const code = (body && body.error) || 'failed';
+      if (code === 'bad_invite' || code === 'invite_required') this.forget('invite');
+      if (!r.ok) throw aiErr(code, { retryAfter: body && body.retryAfter });
       if (!body || !Array.isArray(body.scenes)) throw aiErr('shape');
       return body;
     }

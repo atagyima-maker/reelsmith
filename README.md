@@ -13,7 +13,8 @@ two with **My projects → Export project file / Import project file**.
 | --- | --- |
 | `index.html` | The whole studio: layout, styles and editor code. |
 | `standalone.js` | Storage, downloads and the script-writer connection for a plain website. Projects, brand kit, photos, clips and voice clips are kept in this browser (IndexedDB). |
-| `api/script.js` | The script writer: a Vercel function that asks Claude for a script. It builds the prompt itself, checks every field, and applies rate limits. |
+| `api/script.js` | The script writer on your key: a Vercel function that asks Claude for a script, only for invite codes (or everyone, if you open it). Checks every field and applies limits. |
+| `script-prompt.js` | The script writer's prompt, schema and checks, shared by the server and by visitors writing with their own key. |
 | `api/event.js` | Anonymous usage counts (see Analytics below). |
 | `api/stats.js` + `stats.html` | Your private analytics dashboard. |
 | `api/_lib.js` | Helpers shared by the functions. |
@@ -29,28 +30,51 @@ On Vercel: **Add New → Project**, import this repository, leave every setting 
 (Framework Preset: Other) and press Deploy. The site works straight away as an editor; the
 script writer switches on when you add an API key.
 
-### Switch on AI script writing
+### AI script writing: who pays
 
-1. Create an API key at console.anthropic.com.
-2. **Set a monthly spend limit first** (Console → Settings → Limits). It is the one hard
-   ceiling on what the public site can cost you, whatever happens in the code.
-3. In Vercel: **Project → Settings → Environment Variables**, add `ANTHROPIC_API_KEY`, then
-   redeploy. The idea box and **Write my video** button appear; with no key they stay hidden
-   and the site says plainly that it is an editor.
+Three ways a script can be paid for. You choose which are on.
 
-**Cost.** Each script is one Claude Opus 5.5 call at low effort, roughly 2 to 5 US cents.
-The built-in limits cap the worst case:
+**Never want to pay?** Don't add `ANTHROPIC_API_KEY` to Vercel at all. Visitors then write with their own
+key, and with no key on the server there is nothing of yours to spend, whatever happens in the code.
+
+| Way | Who pays | How it is switched on |
+| --- | --- | --- |
+| **Visitor's own key** | The visitor | Always available. A visitor pastes their own Anthropic API key; the browser sends it straight to Anthropic, and your server never sees it. It is kept on their device only if they tick "remember". |
+| **Invite code** | You | `ANTHROPIC_API_KEY` + `REELSMITH_INVITE_CODES`. Your key only works for requests carrying one of these codes. |
+| **Open to all** | You | `ANTHROPIC_API_KEY` + `REELSMITH_OPEN=1`. Anyone can use your key, within the limits below. Off unless you set it. |
+
+**Your key is never spent unless you choose to.** With `ANTHROPIC_API_KEY` set but no invite codes and
+no `REELSMITH_OPEN`, nobody can use it, not even through direct requests to `/api/script`.
+
+**Set up invite codes**
+1. Create an API key at console.anthropic.com and **set a monthly spend limit** on it (Console →
+   Settings → Limits). That limit is the one ceiling no bug or leaked code can get past.
+2. In Vercel (**Project → Settings → Environment Variables**) add `ANTHROPIC_API_KEY`, and
+   `REELSMITH_INVITE_CODES` as a comma-separated list, for example `sam-k8f2q9x7m1,family-p3v6w2n8`.
+   Use long random codes (6 characters minimum; 12 or more is better), one per person or group, so
+   you can revoke one by deleting it and redeploying.
+3. Redeploy and send each person their code. They enter it once; it is remembered on their device.
+
+**Limits on your key**
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `REELSMITH_PER_CODE_DAY` | 40 | Scripts one invite code can write per day, so a leaked code costs little |
 | `REELSMITH_PER_HOUR` | 8 | Scripts one visitor (IP address) can write per hour |
 | `REELSMITH_PER_DAY` | 25 | Scripts one visitor can write per day |
-| `REELSMITH_SITE_PER_DAY` | 200 | Scripts the whole site can write per day (about $4 to $10 at most) |
+| `REELSMITH_SITE_PER_DAY` | 200 | Scripts your key can write per day, site-wide (about $4 to $10 at most) |
+
+Wrong invite codes are limited to 10 tries an hour per visitor, so codes cannot be guessed. Each
+script on your key is one Claude Opus 5.5 call at low effort, roughly 2 to 5 US cents.
 
 These counters live in each server instance's memory unless you connect Upstash Redis (free
 tier is enough): add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` from the Upstash
 integration in the Vercel Marketplace, and the limits then hold across the whole site.
-Without Redis the limits are approximate, which is why the spend limit in step 2 matters.
+Without Redis the limits are approximate, which is why the spend limit matters.
+
+**About own keys.** Most people do not have an Anthropic API key, so own keys suit power users,
+not the general public. A visitor's key sits in their browser while they use it: the studio tells
+them to use a separate key with its own spend limit, and to remember it only on a device they trust.
 
 ## Analytics
 
@@ -92,7 +116,8 @@ needed.
   device and browser you used. Export a project file for anything you want to keep safe or move
   to another device.
 - Only the idea or change you type, plus the current scene text when you ask for a change, is
-  sent to Anthropic to write the script. Photos, clips and voices never leave the browser.
+  sent to Anthropic to write the script (through your server with an invite code, or straight from
+  the browser with an own key). Photos, clips and voices never leave the browser.
 - Rendering and AI voice work best in Chrome or Edge on a computer.
 - The site loads fonts from Google Fonts, the MP4 writer and voice library from jsDelivr, and
   the voice model from Hugging Face, so it needs an internet connection.

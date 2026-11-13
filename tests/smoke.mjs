@@ -46,8 +46,14 @@ try {
   // Boot and first impression
   check('example project loads with scenes', (await page.$$('.scene')).length === 6);
   check('preview canvas draws', (await canvasLit(page)) > 50);
-  check('with the script writer off, its controls are hidden', !(await page.isVisible('#gen')) && !(await page.isVisible('#idea')));
-  check('with the script writer off, the tagline does not promise it', !/Get a script/i.test(await page.locator('.brand p:visible').innerText()), await page.locator('.brand p:visible').innerText());
+  // With no server writer, anyone can still bring their own key, so Write is offered and asks for one
+  check('Write my video is offered even without a server writer', await page.isVisible('#gen') && await page.isVisible('#idea'));
+  await page.fill('#idea', 'A short video about bees');
+  await page.click('#gen');
+  check('without a code or key, Write asks for one instead of spending anything', await page.isVisible('#ai-access') && !(await page.isVisible('#invite-row')) && (await page.$$('.scene')).length === 6);
+  check('people without a key are told how to get one, and that AI is optional', await page.isVisible('#no-key-help') && /console\.anthropic\.com/.test(await status(page, '#no-key-help')) && /by hand/.test(await status(page, '#no-key-help')));
+  check('the page says AI writing is a paid extra and the rest is free', /paid extra/.test(await status(page, '#ai-access-why')) && /Everything else in Reelsmith is free/.test(await status(page, '#ai-access-why')) && /Reelsmith is free/.test(await status(page, '#ai-hint')));
+  await page.click('#ai-access-close'); await page.fill('#idea', '');
 
   // Playback
   await page.click('#play'); await page.waitForTimeout(1200); await page.click('#play');
@@ -134,7 +140,7 @@ try {
     const a = await newPage(actx);
     const sent = []; let reply = null;
     await actx.route(ORIGIN + '/api/script', r => {
-      if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"enabled":true}' });
+      if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"enabled":true,"invite":false,"open":true}' });
       sent.push(JSON.parse(r.request().postData() || '{}'));
       const x = typeof reply === 'function' ? reply() : reply;
       return r.fulfill({ status: x.status || 200, contentType: 'application/json', body: JSON.stringify(x.body) });
@@ -142,7 +148,7 @@ try {
     const p = a.page;
     await p.goto(ORIGIN + '/'); await p.waitForSelector('#gen', { state: 'visible', timeout: 5000 }).catch(() => {});
     check('with the script writer on, the idea box and Write button show', await p.isVisible('#idea') && await p.isVisible('#gen'));
-    check('with the script writer on, the tagline offers it', /Type an idea/.test(await p.locator('.brand p:visible').innerText()));
+    check('the tagline says the studio is free and AI writing needs your own key', /free video studio/.test(await p.locator('.brand p:visible').innerText()) && /own Anthropic key/.test(await p.locator('.brand p:visible').innerText()));
     await p.click('#gen');
     check('empty idea asks for one first, without calling the server', /Describe your video idea first/.test(await status(p, '#ai-status')) && sent.length === 0);
 
@@ -187,6 +193,103 @@ try {
     await g.page.locator('.scene').first().locator('[data-f=caption]').fill('x'); await g.page.waitForTimeout(500);
     check('Global Privacy Control: no analytics are sent', g.events.length === 0, String(g.events.length));
     await gctx.close();
+  }
+
+  // Invite codes and the visitor's own key (the real Anthropic SDK, loaded the way a browser would)
+  {
+    const kctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    const k = await newPage(kctx);
+    const toServer = [], toAnthropic = [], everyRequest = [];
+    kctx.on('request', r => everyRequest.push({ url: r.url(), headers: r.headers(), body: r.postData() || '' }));
+    // The SDK from node_modules: jsDelivr's single-file build is not reachable from tests.
+    const NM = join(ROOT, 'node_modules');
+    const SDKV = JSON.parse(await readFile(join(NM, '@anthropic-ai/sdk/package.json'), 'utf8')).version;
+    const browserMap = JSON.parse(await readFile(join(NM, '@anthropic-ai/sdk/package.json'), 'utf8')).browser || {};
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
+    await kctx.route(`https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@${SDKV}/+esm`, r => r.fulfill({ headers: cors, contentType: 'text/javascript',
+      body: "export { default } from 'https://sdk.test/@anthropic-ai/sdk/index.mjs'; export * from 'https://sdk.test/@anthropic-ai/sdk/index.mjs';" }));
+    await kctx.route('https://sdk.test/**', async r => {
+      let rel = new URL(r.request().url()).pathname.slice(1);
+      const pkgRel = './' + rel.replace(/^@anthropic-ai\/sdk\//, '');
+      if (rel.startsWith('@anthropic-ai/sdk/') && browserMap[pkgRel]) rel = '@anthropic-ai/sdk/' + browserMap[pkgRel].slice(2);
+      try { r.fulfill({ headers: cors, contentType: 'text/javascript', body: await readFile(join(NM, rel)) }); } catch { r.fulfill({ status: 404, headers: cors, body: '' }); }
+    });
+    await kctx.route(ORIGIN + '/', async r => {
+      const html = (await readFile(join(ROOT, 'index.html'), 'utf8')).replace('<head>', '<head><script type="importmap">' + JSON.stringify({ imports: {
+        '@opentelemetry/api': 'https://sdk.test/@opentelemetry/api/dist/index.mjs', 'standardwebhooks': 'data:text/javascript,export class Webhook { verify() {} }' } }) + '</script>');
+      r.fulfill({ contentType: 'text/html', body: html });
+    });
+    // The site's writer is in invite mode; codes other than this one are refused.
+    await kctx.route(ORIGIN + '/api/script', r => {
+      if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"enabled":true,"invite":true,"open":false}' });
+      const code = r.request().headers()['x-reelsmith-invite'];
+      toServer.push({ code, body: JSON.parse(r.request().postData() || '{}') });
+      if (code !== 'friends-2026-reel') return r.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"bad_invite"}' });
+      r.fulfill({ contentType: 'application/json', body: JSON.stringify({ title: 'Invite script', scenes: [{ kind: 'scene', caption: 'From the invite', sub: '', narration: 'x', visual: '', duration: 4, palette: null }] }) });
+    });
+    // Anthropic's API, answering the browser directly.
+    let anthropicReply = null;
+    await kctx.route('https://api.anthropic.com/**', r => {
+      if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: cors });
+      toAnthropic.push({ headers: r.request().headers(), body: JSON.parse(r.request().postData() || '{}') });
+      const x = anthropicReply;
+      r.fulfill({ status: x.status || 200, headers: { ...cors, 'request-id': 'req_test' }, contentType: 'application/json', body: JSON.stringify(x.body) });
+    });
+    const p = k.page;
+    await p.goto(ORIGIN + '/'); await p.waitForFunction(() => document.querySelectorAll('.scene').length > 0);
+    await p.waitForFunction(() => !document.querySelector('#invite-row').hidden || document.querySelector('#ai-hint').textContent.includes('invite')).catch(() => {});
+
+    await p.fill('#idea', 'A promo for my barbershop Saturday hours');
+    await p.click('#gen');
+    check('invite mode: Write asks for a code or key, with the invite field shown', await p.isVisible('#ai-access') && await p.isVisible('#invite-row') && toServer.length === 0);
+    await p.fill('#invite-code', 'wrong-code-1'); await p.click('#invite-use');
+    await p.waitForFunction(() => /invite code didn't work/.test(document.querySelector('#ai-status').textContent), null, { timeout: 5000 }).catch(() => {});
+    check('a wrong invite code is refused, forgotten, and the box reopens', /invite code didn't work/.test(await status(p, '#ai-status')) && await p.isVisible('#ai-access') && (await p.evaluate(() => localStorage.getItem('reelsmith-invite'))) === null);
+    await p.fill('#invite-code', 'friends-2026-reel'); await p.click('#invite-use');
+    await p.waitForFunction(() => /Done:/.test(document.querySelector('#ai-status').textContent), null, { timeout: 5000 }).catch(() => {});
+    check('a valid invite code continues straight into writing', /Done:/.test(await status(p, '#ai-status')) && toServer.at(-1).code === 'friends-2026-reel' && (await p.inputValue('#proj-title')) === 'Invite script');
+    check('the studio says what is paying', /invite code/.test(await status(p, '#ai-using')));
+
+    // Switch to the visitor's own key
+    await p.click('#ai-change');
+    await p.fill('#own-key', 'not-a-key'); await p.click('#own-key-use');
+    check('something that is not an Anthropic key is rejected before use', /does not look like an Anthropic API key/.test(await status(p, '#ai-access-why')) && toAnthropic.length === 0);
+    const KEY = 'sk-ant-api03-TESTKEY-' + 'x'.repeat(40);
+    anthropicReply = { body: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 5, output_tokens: 5 },
+      content: [{ type: 'text', text: JSON.stringify({ title: 'Own-key script', scenes: [{ kind: 'scene', caption: 'Paid by me', sub: '', narration: 'y', visual: '', duration: 4, palette: ['#111111', '#222222'] }, { kind: 'scene', caption: 'Second', sub: '', narration: 'z', visual: '', duration: 3, palette: null }] }) }] } };
+    await p.fill('#own-key', KEY); await p.click('#own-key-use');
+    await p.close(); // reopen below to check what was remembered; first write with the key in a fresh page
+    const p2 = await kctx.newPage(); k.page = p2;
+    await p2.goto(ORIGIN + '/'); await p2.waitForFunction(() => document.querySelectorAll('.scene').length > 0);
+    check('an own key is not kept after a reload unless "remember" was ticked', (await p2.evaluate(() => localStorage.getItem('reelsmith-own-key'))) === null);
+    await p2.waitForTimeout(300);
+    check('a valid invite code is remembered on the device', /invite code/.test(await status(p2, '#ai-using')));
+    await p2.click('#ai-change'); await p2.waitForSelector('#ai-access', { state: 'visible' });
+    await p2.fill('#own-key', KEY); await p2.check('#own-key-remember'); await p2.click('#own-key-use');
+    await p2.fill('#idea', 'A promo for my barbershop Saturday hours'); await p2.click('#gen'); // own key now takes priority over the code
+    await p2.waitForFunction(() => /Done:|could not|didn't|Could not/.test(document.querySelector('#ai-status').textContent), null, { timeout: 15000 }).catch(() => {});
+    const call = toAnthropic.at(-1);
+    check('own key: the script comes from Anthropic directly, written by the real SDK', /Done:/.test(await status(p2, '#ai-status')) && (await p2.inputValue('#proj-title')) === 'Own-key script', await status(p2, '#ai-status'));
+    // The SDK picks the header (x-api-key, or Authorization: Bearer on newer API versions); either way it must carry this key.
+    const sentKey = call && (call.headers['x-api-key'] || (call.headers.authorization || '').replace(/^Bearer /, ''));
+    check('own key: sent only to Anthropic, with the browser-access header', sentKey === KEY && call.headers['anthropic-dangerous-direct-browser-access'] === 'true');
+    check('own key: same prompt and settings as the server (shared module)', call && call.body.model === 'claude-opus-5-5' && call.body.fallbacks === 'default' && call.body.output_config.effort === 'low' && /<idea>A promo for my barbershop Saturday hours<\/idea>/.test(call.body.messages[0].content));
+    check('own key: never sent to Reelsmith or anywhere but Anthropic', !everyRequest.some(r => !r.url.startsWith('https://api.anthropic.com/') && (r.url.includes(KEY) || JSON.stringify(r.headers).includes(KEY) || r.body.includes(KEY))));
+    check('own key: remembered only when ticked', (await p2.evaluate(() => localStorage.getItem('reelsmith-own-key'))) === KEY && /own Anthropic key \(remembered/.test(await status(p2, '#ai-using')));
+
+    anthropicReply = { status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } };
+    await p2.fill('#revise', 'make it shorter'); await p2.press('#revise', 'Enter');
+    await p2.waitForFunction(() => /didn't accept/.test(document.querySelector('#ai-status').textContent), null, { timeout: 15000 }).catch(() => {});
+    check('a revoked key gets a clear message and is forgotten', /didn't accept that API key/.test(await status(p2, '#ai-status')) && (await p2.evaluate(() => localStorage.getItem('reelsmith-own-key'))) === null && await p2.isVisible('#ai-access'));
+    anthropicReply = { status: 400, body: { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } } };
+    await p2.fill('#own-key', KEY); await p2.click('#own-key-use');
+    await p2.waitForFunction(() => /out of credit/.test(document.querySelector('#ai-status').textContent), null, { timeout: 15000 }).catch(() => {});
+    check('an account with no credit gets a clear message', /out of credit/.test(await status(p2, '#ai-status')));
+    check('scenes are untouched when the key fails', (await p2.inputValue('#proj-title')) === 'Own-key script');
+    await p2.click('#ai-change'); await p2.click('#ai-forget');
+    check('"Forget" removes the saved key and code from the device', (await p2.evaluate(() => [localStorage.getItem('reelsmith-own-key'), localStorage.getItem('reelsmith-invite')])).every(v => v === null));
+    check('no script errors with invite codes and own keys', k.errors.length === 0, k.errors.slice(0, 3).join(' | '));
+    await kctx.close();
   }
 
   // Owner dashboard (stats.html) with made-up numbers from a stand-in /api/stats

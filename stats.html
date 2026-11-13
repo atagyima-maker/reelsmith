@@ -92,7 +92,7 @@ th:first-child, td:first-child { text-align: left; } th { color: var(--muted); f
     </section>
 
     <div class="grid2" style="margin-top:16px">
-      <section class="panel"><h2>AI script writer</h2><p class="sub">Claude cost is an estimate from tokens used, at Opus 5.5 list prices.</p><ul class="list" id="ai"></ul></section>
+      <section class="panel"><h2>AI script writer</h2><p class="sub">Cost covers only scripts on your key, estimated from tokens used at Opus 5.5 list prices. Visitors' own keys cost you nothing.</p><ul class="list" id="ai"></ul></section>
       <section class="panel"><h2>Quality</h2><p class="sub">Things that make people unhappy. Lower is better.</p><ul class="list" id="health"></ul></section>
     </div>
 
@@ -167,12 +167,13 @@ function render(days) {
 
   const tin = sum(days, d => d.server.tokens_in), tout = sum(days, d => d.server.tokens_out), calls = sum(days, d => d.server.script_calls);
   const cost = tin / 1e6 * 4 + tout / 1e6 * 20;
-  const fails = ['rate_limited', 'daily_limit', 'site_busy', 'refused', 'shape', 'failed', 'offline', 'unavailable'].map(v => [v, val('script_fail', v)]).filter(([, n]) => n);
-  const failLabel = { rate_limited: 'Hit the hourly limit', daily_limit: 'Hit the daily limit', site_busy: 'Site-wide daily cap reached', refused: 'Claude declined the idea', shape: 'Came back malformed', failed: 'Server or API error', offline: 'Visitor offline', unavailable: 'Writer switched off' };
+  const fails = ['rate_limited', 'daily_limit', 'site_busy', 'code_limit', 'bad_invite', 'bad_key', 'no_credit', 'key_rate_limited', 'refused', 'shape', 'failed', 'offline', 'unavailable'].map(v => [v, val('script_fail', v)]).filter(([, n]) => n);
+  const failLabel = { code_limit: 'Invite code hit its daily limit', bad_invite: 'Wrong invite code', bad_key: 'Own key not accepted', no_credit: 'Own key out of credit', key_rate_limited: 'Own key rate-limited by Anthropic', rate_limited: 'Hit the hourly limit', daily_limit: 'Hit the daily limit', site_busy: 'Site-wide daily cap reached', refused: 'Claude declined the idea', shape: 'Came back malformed', failed: 'Server or API error', offline: 'Visitor offline', unavailable: 'Writer switched off' };
   $('#ai').innerHTML = [
     ['Scripts written', nf(C('script_ok'))], ['  new / edits', `${nf(val('script_ok', 'new'))} / ${nf(val('script_ok', 'revise'))}`],
     ['Visitors who wrote one', `${nf(V('script_ok'))} · ${pct(V('script_ok'), visitors)}`],
-    ['Claude calls', nf(calls)], ['Estimated Claude cost', '$' + cost.toFixed(2) + (calls ? ` · ${(cost / calls * 100).toFixed(1)}¢ each` : '')],
+    ['Paid by visitors\u2019 own keys', nf(val('script_source', 'own'))], ['Paid by you (invite codes)', nf(val('script_source', 'invite'))], ['Paid by you (open to all)', nf(val('script_source', 'open'))],
+    ['Claude calls on your key', nf(calls)], ['Estimated cost to you', '$' + cost.toFixed(2) + (calls ? ` · ${(cost / calls * 100).toFixed(1)}¢ each` : '')],
     ...fails.map(([v, n]) => ['Failed: ' + failLabel[v], nf(n)])
   ].map(([a, b]) => `<li><span>${esc(a)}</span><span>${esc(b)}</span></li>`).join('');
 

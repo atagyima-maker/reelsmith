@@ -16,7 +16,8 @@ const ASPECTS = ['9:16', '16:9', '1:1'];
 export const EVENTS = {
   visit: null,
   script_ok: ['new', 'revise'],
-  script_fail: ['rate_limited', 'daily_limit', 'site_busy', 'refused', 'unavailable', 'offline', 'shape', 'failed', 'bad_request', 'forbidden', 'too_large'],
+  script_source: ['own', 'invite', 'open'],
+  script_fail: ['rate_limited', 'daily_limit', 'site_busy', 'code_limit', 'refused', 'unavailable', 'offline', 'shape', 'failed', 'bad_request', 'forbidden', 'too_large', 'bad_invite', 'invite_required', 'bad_key', 'no_credit', 'key_rate_limited'],
   scene_edit: null,
   media_add: ['image', 'video'],
   voice_ok: null,

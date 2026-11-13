@@ -65,7 +65,7 @@ header.top { display: flex; align-items: center; justify-content: space-between;
 .hint { color: var(--muted); font-size: 0.85rem; margin: 0; }
 
 label { display: flex; flex-direction: column; gap: 5px; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
-input[type=text], input[type=number], textarea, select {
+input[type=text], input[type=number], input[type=password], textarea, select {
   font: inherit; font-size: 0.95rem; text-transform: none; letter-spacing: 0; font-weight: 400;
   color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; width: 100%; min-width: 0;
 }
@@ -200,8 +200,8 @@ body:not(.standalone) .manual-only, body.ai-on .manual-only { display: none !imp
   <header class="top">
     <div class="brand">
       <h1>Reel<span>smith</span></h1>
-      <p class="ai-write">Type an idea. Get a script, scenes and captions. Render a video.</p>
-      <p class="manual-only">Scenes, captions, AI voice and music, rendered to MP4. All in your browser, free.</p>
+      <p class="claude-only">Type an idea. Get a script, scenes and captions. Render a video.</p>
+      <p class="standalone-only">A free video studio: scenes, captions, AI voice and music, rendered to MP4 in your browser. AI script writing is an optional extra with your own Anthropic key.</p>
     </div>
     <div class="projbar">
       <span class="pill" id="example-pill">Example project</span>
@@ -357,7 +357,18 @@ body:not(.standalone) .manual-only, body.ai-on .manual-only { display: none !imp
           <input type="text" id="revise" class="grow" placeholder="Ask for changes: 'make it funnier', 'add a scene about pricing'">
           <button id="revise-btn">Apply edit</button>
         </div>
-        <p class="hint standalone-only ai-write" style="font-size:.8rem">Scripts are written by Claude. Free to use, a few per hour. Your idea is sent to Anthropic to write it; nothing else leaves this browser.</p>
+        <p class="hint standalone-only ai-write" id="ai-hint" style="font-size:.8rem">Reelsmith is free. AI script writing is an optional paid extra: it uses your own Anthropic API key, and Anthropic charges you a few cents per script. Your idea is sent to Anthropic to write it; nothing else leaves this browser.</p>
+        <p class="hint standalone-only" id="ai-using" hidden style="font-size:.8rem"><span></span> <button class="small ghost" id="ai-change">Change</button></p>
+        <div class="audio-row standalone-only" id="ai-access" hidden>
+          <h3>Unlock AI writing</h3>
+          <p class="hint" id="ai-access-why">AI writing needs an invite code or your own Anthropic API key.</p>
+          <div class="row" id="invite-row"><input type="text" id="invite-code" class="grow" placeholder="Invite code" autocomplete="off" spellcheck="false" aria-label="Invite code"><button class="small primary" id="invite-use">Use code</button></div>
+          <div class="row"><input type="password" id="own-key" class="grow" placeholder="Your Anthropic API key (sk-ant-…)" autocomplete="off" spellcheck="false" aria-label="Your Anthropic API key"><button class="small primary" id="own-key-use">Use my key</button></div>
+          <label class="check"><input type="checkbox" id="own-key-remember"> Remember my key on this device</label>
+          <p class="hint" id="no-key-help"><b>No key?</b> Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">console.anthropic.com</a> (Settings → API keys). Anthropic bills you directly, a few cents per script. Or skip AI: add scenes by hand in step 02, then voice, score and render as usual.</p>
+          <p class="hint">Your key goes straight from this browser to Anthropic, and Reelsmith's server never sees it. Use a separate key with a spend limit (console.anthropic.com), and only on a device you trust.</p>
+          <div class="row"><button class="small ghost" id="ai-forget" hidden>Forget my saved key and code</button><button class="small ghost" id="ai-access-close">Close</button></div>
+        </div>
         <p class="status" id="ai-status" aria-live="polite"></p>
       </section>
 
@@ -1393,6 +1404,11 @@ function aiError(e) {
     : c === 'rate_limited' ? `You've written a few scripts in a short time. Try again in ${waitText(e.retryAfter)}, or edit the scenes by hand.`
     : c === 'daily_limit' ? "That's today's free scripts used up. Come back tomorrow, or keep editing these scenes by hand."
     : c === 'site_busy' ? 'The free script writer is at capacity for today. Try again tomorrow, or edit the scenes by hand.'
+    : c === 'code_limit' ? 'That invite code has been used a lot today. Try again tomorrow, or use your own Anthropic key.'
+    : c === 'bad_invite' || c === 'invite_required' ? "That invite code didn't work. Check it with whoever gave it to you, or use your own Anthropic key."
+    : c === 'bad_key' ? "Anthropic didn't accept that API key. Check it, or create a new one at console.anthropic.com."
+    : c === 'no_credit' ? 'Your Anthropic account is out of credit. Add credit at console.anthropic.com, then try again.'
+    : c === 'key_rate_limited' ? 'Anthropic is limiting requests on your key right now. Wait a minute and try again.'
     : c === 'refused' ? 'Claude could not write a script for that idea. Try describing it differently.'
     : c === 'unavailable' ? 'Script writing is switched off right now. You can still edit every scene by hand.'
     : c === 'offline' ? 'Could not reach the script writer. Check your connection and try again.'
@@ -1425,6 +1441,8 @@ ${JSON.stringify({ title: project.title, scenes: current })}
 Apply this change requested by the creator: """${ask}"""
 Keep everything the creator did not ask to change. ${SCHEMA}`;
   }
+  if (web && !window.RS_AI.access()) { showAccess(mode); return; }
+  const how = web ? window.RS_AI.access() : 'claude';
   const btns = [$('#gen'), $('#revise-btn')]; btns.forEach(b => b.disabled = true); aiBusy = true;
   const hadWork = !project.example && project.scenes.some(s => s.caption || s.narration);
   setStatus(aiStatus, `<span class="spin"></span> ${mode === 'new' ? 'Writing your script and scenes…' : 'Applying your edit…'}`);
@@ -1432,16 +1450,57 @@ Keep everything the creator did not ask to change. ${SCHEMA}`;
     const forSession = sessionN;
     const data = web ? await window.RS_AI.write(req) : await sample.json(input, { modelTier: 'default' });
     if (sessionN !== forSession) { setStatus(aiStatus, ''); return; } // a different project was opened meanwhile
-    applyAI(data, mode !== 'new'); stat('script_ok', mode === 'new' ? 'new' : 'revise');
+    applyAI(data, mode !== 'new'); stat('script_ok', mode === 'new' ? 'new' : 'revise'); stat('script_source', how);
     setStatus(aiStatus, `Done: ${project.scenes.length} scenes, ${fmt(total())} total. Press play to preview.${hadWork ? ' Undo brings back your previous scenes.' : ''}`, 'ok');
     if (mode !== 'new') $('#revise').value = '';
   } catch (e) {
     setStatus(aiStatus, aiError(e), 'err'); stat('script_fail', e && e.code);
-  } finally { aiBusy = false; btns.forEach(b => b.disabled = !!exporting); }
+    if (web && ['bad_invite', 'invite_required', 'bad_key', 'needs_access'].includes(e && e.code)) showAccess(mode, aiError(e));
+  } finally { aiBusy = false; btns.forEach(b => b.disabled = !!exporting); updateAccessUI(); }
 }
 $('#gen').addEventListener('click', () => runAI('new'));
 $('#revise-btn').addEventListener('click', () => runAI('revise'));
 $('#revise').addEventListener('keydown', e => { if (e.key === 'Enter') runAI('revise'); });
+/* Who pays for AI writing on the website: an invite code (the owner's key) or the visitor's own key. */
+let pendingAI = null;
+const srvState = () => (window.RS_AI && window.RS_AI.serverState) || {};
+function updateAccessUI() {
+  if (!window.RS_STANDALONE || !window.RS_AI) return;
+  const how = window.RS_AI.access(), srv = srvState();
+  const using = $('#ai-using');
+  using.hidden = !how || how === 'open';
+  using.querySelector('span').textContent = how === 'own' ? `Writing with your own Anthropic key${window.RS_AI.remembered() ? ' (remembered on this device)' : ''}.` : how === 'invite' ? 'Writing with an invite code.' : '';
+  $('#ai-hint').textContent = srv.open ? 'Scripts are written by Claude. Free to use, a few per hour. Your idea is sent to Anthropic to write it; nothing else leaves this browser.'
+    : `Reelsmith is free. AI script writing is an optional paid extra: it uses ${srv.invite ? 'an invite code or ' : ''}your own Anthropic API key, and Anthropic charges you a few cents per script. Your idea is sent to Anthropic to write it; nothing else leaves this browser.`;
+  $('#invite-row').hidden = !srv.invite;
+  $('#ai-access-why').textContent = srv.invite ? 'AI writing needs an invite code or your own Anthropic API key.' : 'AI script writing is a paid extra: it needs your own Anthropic API key. Everything else in Reelsmith is free.';
+  $('#ai-forget').hidden = !(how === 'own' || how === 'invite' || window.RS_AI.remembered());
+}
+function showAccess(mode, why) {
+  pendingAI = mode || null; updateAccessUI();
+  if (why) $('#ai-access-why').textContent = why;
+  $('#ai-access').hidden = false;
+  setStatus(aiStatus, why || (srvState().invite ? 'Add an invite code or your own Anthropic key to write with AI.' : 'Add your own Anthropic key to write with AI, or build your scenes by hand for free.'), why ? 'err' : '');
+  ($('#invite-row').hidden ? $('#own-key') : $('#invite-code')).focus();
+}
+function accessReady() {
+  $('#ai-access').hidden = true; updateAccessUI(); setStatus(aiStatus, '');
+  const m = pendingAI; pendingAI = null; if (m) runAI(m);
+}
+$('#invite-use').addEventListener('click', () => {
+  const code = $('#invite-code').value.trim();
+  if (code.length < 6) { $('#ai-access-why').textContent = 'Invite codes are at least 6 characters. Check the code you were given.'; return; }
+  window.RS_AI.setInvite(code); $('#invite-code').value = ''; accessReady();
+});
+$('#own-key-use').addEventListener('click', () => {
+  const key = $('#own-key').value.trim();
+  if (!window.RS_AI.looksLikeKey(key)) { $('#ai-access-why').textContent = 'That does not look like an Anthropic API key. Keys start with sk-ant- and come from console.anthropic.com.'; return; }
+  window.RS_AI.setOwnKey(key, $('#own-key-remember').checked); $('#own-key').value = ''; accessReady();
+});
+['#invite-code', '#own-key'].forEach(sel => $(sel).addEventListener('keydown', e => { if (e.key === 'Enter') $(sel === '#own-key' ? '#own-key-use' : '#invite-use').click(); }));
+$('#ai-change').addEventListener('click', () => showAccess(null));
+$('#ai-forget').addEventListener('click', () => { window.RS_AI.forget(); updateAccessUI(); $('#ai-access-why').textContent = 'Forgotten. Nothing is saved on this device now.'; });
+$('#ai-access-close').addEventListener('click', () => { $('#ai-access').hidden = true; pendingAI = null; });
 
 /* ---------- Render / export ---------- */
 const rStatus = $('#render-status');
@@ -2543,7 +2602,7 @@ if (project.sfx.on) queueSfx();
 initCloud();
 stat('visit');
 { let errs = 0; window.addEventListener('error', () => { if (errs++ < 3) stat('js_error'); }); window.addEventListener('unhandledrejection', () => { if (errs++ < 3) stat('js_error'); }); }
-if (window.RS_STANDALONE && window.RS_AI) window.RS_AI.status().then(on => document.body.classList.toggle('ai-on', !!on)).catch(() => {});
+if (window.RS_STANDALONE && window.RS_AI) { document.body.classList.add('ai-on'); window.RS_AI.status().then(st => { window.RS_AI.serverState = st; updateAccessUI(); }).catch(() => {}); updateAccessUI(); }
 })();
 </script>
 </body>
