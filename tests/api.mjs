@@ -6,6 +6,8 @@ import Anthropic from '@anthropic-ai/sdk';
 
 process.env.ANTHROPIC_API_KEY = 'test-key';
 process.env.REELSMITH_PER_HOUR = '3';
+process.env.REELSMITH_PER_CODE_DAY = '2';
+process.env.REELSMITH_OPEN = '1'; // most checks below run in open mode; invite mode is checked further down
 process.env.REELSMITH_SITE_PER_DAY = '1000';
 const api = await import('../api/script.js');
 
@@ -102,6 +104,38 @@ try {
   check('bad API key returns 503 unavailable', (await call(req(newIdea))).status === 503);
   next = { status: 500, body: { type: 'error', error: { type: 'api_error', message: 'boom' } } };
   check('Anthropic outage returns 502 failed', (await call(req(newIdea))).body.error === 'failed');
+
+  // Invite mode: the owner's key only works with a code
+  delete process.env.REELSMITH_OPEN;
+  process.env.REELSMITH_INVITE_CODES = 'short, friends-2026-reel , family-9f3k2';
+  let st = await (await api.GET()).json();
+  check('with invite codes set, GET reports invite mode', st.enabled === true && st.invite === true && st.open === false, JSON.stringify(st));
+  next = message(good); last = null;
+  r = await call(req(newIdea));
+  check('no invite code: refused before any API call', r.status === 401 && r.body.error === 'invite_required' && last === null);
+  r = await call(req(newIdea, { 'x-reelsmith-invite': 'friends-2026-rea' }));
+  check('wrong invite code: refused before any API call', r.status === 401 && r.body.error === 'bad_invite' && last === null);
+  r = await call(req(newIdea, { 'x-reelsmith-invite': 'short' }));
+  check('codes shorter than 6 characters are ignored', r.status === 401 && r.body.error === 'bad_invite');
+  r = await call(req(newIdea, { 'x-reelsmith-invite': 'friends-2026-reel' }));
+  check('valid invite code (spaces around it in the setting are fine) writes a script', r.status === 200 && last !== null);
+  r = await call(req(newIdea, { 'x-reelsmith-invite': 'family-9f3k2' }));
+  check('any of the listed codes works', r.status === 200);
+  api._resetLimits();
+  const codeUses = [];
+  for (let i = 0; i < 3; i++) codeUses.push((await call(req(newIdea, { 'x-reelsmith-invite': 'friends-2026-reel' }))).status);
+  check('each invite code has its own daily limit (2 in this test)', codeUses.join() === '200,200,429', codeUses.join());
+  api._resetLimits();
+  const guesses = [];
+  for (let i = 0; i < 12; i++) guesses.push((await call(req(newIdea, { 'x-reelsmith-invite': 'guess-' + i, 'x-real-ip': '6.6.6.6' }))).status);
+  check('guessing codes is cut off after 10 wrong tries an hour', guesses.slice(0, 10).every(c => c === 401) && guesses[10] === 429, guesses.join());
+
+  // Key set but no codes and not open: the key is never used
+  delete process.env.REELSMITH_INVITE_CODES;
+  st = await (await api.GET()).json();
+  check('key without codes or REELSMITH_OPEN: GET reports the writer off', st.enabled === false);
+  last = null;
+  check('key without codes or REELSMITH_OPEN: nobody can spend it', (await call(req(newIdea, { 'x-reelsmith-invite': 'friends-2026-reel' }))).status === 503 && last === null);
 
   // Feature off
   delete process.env.ANTHROPIC_API_KEY;

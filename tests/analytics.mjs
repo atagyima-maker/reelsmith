@@ -100,7 +100,7 @@ try {
   check('days ask is capped at 90', (await (await stats.GET(statsReq('correct-horse-battery', 5000))).json()).days.length === 90);
 
   // Script writer: token usage is recorded, rate limits use Redis
-  process.env.ANTHROPIC_API_KEY = 'test';
+  process.env.ANTHROPIC_API_KEY = 'test'; process.env.REELSMITH_OPEN = '1';
   const script = await import('../api/script.js');
   const fake = { beta: { messages: { create: async () => ({ stop_reason: 'end_turn', usage: { input_tokens: 900, output_tokens: 1500 },
     content: [{ type: 'text', text: JSON.stringify({ title: 't', scenes: [{ kind: 'scene', caption: 'a', sub: '', narration: 'b', visual: 'c', duration: 4, palette: ['#000000', '#ffffff'] }] }) }] }) } } };

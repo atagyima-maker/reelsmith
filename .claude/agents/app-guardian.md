@@ -35,10 +35,14 @@ framework, no new dependencies beyond `@anthropic-ai/sdk`.
 - **First impression.** The preview must never open blank, copy must not promise features this build
   lacks (AI images exist only in the Claude version; script writing only when `/api/script` reports
   it is on), and a phone must not scroll sideways.
-- **The script writer spends money.** In `api/script.js` the prompt is built on the server from
-  checked form fields; never let the browser send prompt text. Keep the size caps, the rate limits
-  and the same-site check, and add a check in `tests/api.mjs` for any new field. Never call the real
-  API from tests.
+- **The script writer spends money.** The owner's key (`api/script.js`) is only used with a valid
+  invite code, or for everyone when `REELSMITH_OPEN=1`; never let it be spent any other way. The
+  prompt comes from `script-prompt.js` and is built from checked form fields; never let the browser
+  send prompt text to the server. Keep the size caps, the limits (per visitor, per code, wrong codes,
+  site-wide) and the same-site check, and add a check in `tests/api.mjs` for any new field.
+- **A visitor's own key goes only to Anthropic.** It is used in the browser with the SDK and must
+  never be sent to the site, logged, or stored unless they tick "remember". `tests/smoke.mjs`
+  checks every request for it; keep that. Never call the real API from tests.
 - **Analytics must stay anonymous.** Events are names from the fixed list in `api/event.js` plus at
   most one allow-listed value. Never send project text, file names, ideas or ids, never store an IP
   address (hash it), never set a cookie. `tests/analytics.mjs` scans the store for leaks; keep that.
