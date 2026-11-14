@@ -24,7 +24,7 @@ async function newPage(ctx) {
     catch { route.fulfill({ status: 404, body: 'not found' }); }
   });
   if (process.env.VENDOR_DIR) {
-    await ctx.route('https://cdn.jsdelivr.net/npm/mp4-muxer@*/build/mp4-muxer.js', async r => r.fulfill({ contentType: 'text/javascript', body: await readFile(join(process.env.VENDOR_DIR, 'mp4-muxer.js')) }));
+    await ctx.route('https://cdn.jsdelivr.net/npm/mp4-muxer@*/build/mp4-muxer.js', async r => r.fulfill({ contentType: 'text/javascript', headers: { 'access-control-allow-origin': '*' }, body: await readFile(join(process.env.VENDOR_DIR, 'mp4-muxer.js')) }));
   }
   const events = [];
   await ctx.route(ORIGIN + '/api/event', r => { try { events.push(JSON.parse(r.request().postData() || '{}')); } catch {} r.fulfill({ status: 204 }); });
